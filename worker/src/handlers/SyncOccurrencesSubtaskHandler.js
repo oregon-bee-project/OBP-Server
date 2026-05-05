@@ -63,6 +63,9 @@ export default class SyncOccurrencesSubtaskHandler extends BaseSubtaskHandler {
         } else if (subtask.operation === 'write' && subtask.file === 'backupOccurrences') {
             await TaskService.logTaskStep(taskId, 'Archiving backup occurrences')
 
+            // Copy workingOccurrences.csv into backupOccurrences.csv
+            FileManager.copyFile(workingOccurrencesFilePath, backupOccurrencesFilePath)
+
             // Create a timestamped copy of backupOccurrences.csv and archive it in /shared/data/backups
             const now = new Date()
             const timestamp = now.toISOString().slice(0, -5).replaceAll(':', '.')   // ISO minus milliseconds, replace : with .
@@ -76,9 +79,6 @@ export default class SyncOccurrencesSubtaskHandler extends BaseSubtaskHandler {
             FileManager.limitFilesInDirectory('./shared/data/backups', fileLimits.maxBackups, { archive: false })
 
             await TaskService.logTaskStep(taskId, 'Writing into backup occurrences from working occurrences')
-
-            // Copy workingOccurrences.csv into backupOccurrences.csv
-            FileManager.copyFile(workingOccurrencesFilePath, backupOccurrencesFilePath)
         }
     }
 }
