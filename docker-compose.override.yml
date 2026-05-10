@@ -3,6 +3,8 @@ services:
         command: npm run dev
     
     worker:
+        ports:
+            - '9229:9229' # For node-inspect debugging
         command: npm run dev
 
     nginx:

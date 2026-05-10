@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon -L --watch src --watch shared/lib src/index.js"
+    "dev": "nodemon --inspect=0.0.0.0:9229 -L --watch src --watch shared/lib src/index.js"
   },
   "keywords": [],
   "author": "",
