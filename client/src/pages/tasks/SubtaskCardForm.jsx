@@ -25,14 +25,28 @@ const SubtaskCardFormContainer = styled.div`
 
         font-size: 12pt;
 
+        legend {
+            margin-bottom: 2px;
+
+            padding: 0px;
+
+            font-size: 12pt;
+            font-weight: bold;
+        }
+
         p {
             margin: 0px;
+        }
+
+        .subtaskSettingsFieldset {
+            gap: 5px;
+            margin-top: 5px;
         }
 
         .subtaskSetting {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 5px;
 
             white-space: nowrap;
 
@@ -74,6 +88,7 @@ const SubtaskCardFormContainer = styled.div`
 `
 
 export default function SubtaskCardForm({ type, taskState, pipelineState, setPipelineState }) {
+    const subtasksWithSettings = ['occurrences', 'observations', 'labels', 'addresses']
     const firstDay = new Date(new Date().getFullYear(), 0, 1)
     const firstDayFormatted = `${firstDay.getFullYear()}-${(firstDay.getMonth() + 1).toString().padStart(2, '0')}-${firstDay.getDate().toString().padStart(2, '0')}`
     const currentDate = new Date()
@@ -82,7 +97,6 @@ export default function SubtaskCardForm({ type, taskState, pipelineState, setPip
     const [ maxDate, setMaxDate ] = useState(currentDateFormatted)
     const [ excludeOutput, setExcludeOutput ] = useState(false)
     const [ includeUnprintedRows, setIncludeUnprintedRows ] = useState(false)
-    const [ ignoreDateLabelPrint, setIgnoreDateLabelPrint ] = useState(false)
 
     const descriptions = {
         'occurrences': 'Formats and updates an occurrences file',
@@ -104,57 +118,67 @@ export default function SubtaskCardForm({ type, taskState, pipelineState, setPip
                     pipelineState={pipelineState}
                     setPipelineState={setPipelineState}
                 />
-
-                { type === 'observations' &&
-                    <>
-                        <ProjectSelection />
-                        
+                <fieldset className="subtaskSettingsFieldset">
+                    { subtasksWithSettings.includes(type) &&
+                        <legend>Subtask settings:</legend>
+                    }
+                    { type === 'observations' &&
+                        <>
+                            <ProjectSelection />
+                            
+                            <div className='subtaskSetting'>
+                                <label htmlFor='minDate'>Minimum Date:</label>
+                                <input id='minDate' type='date' value={minDate} onChange={(e) => setMinDate(e.target.value)} required />
+                            </div>
+                            <div className='subtaskSetting'>
+                                <label htmlFor='maxDate'>Maximum Date:</label>
+                                <input id='maxDate' type='date' value={maxDate} onChange={(e) => setMaxDate(e.target.value)} required />
+                            </div>
+                        </>
+                    }
+                    { (type === 'labels') &&
                         <div className='subtaskSetting'>
-                            <label htmlFor='minDate'>Minimum Date:</label>
-                            <input id='minDate' type='date' value={minDate} onChange={(e) => setMinDate(e.target.value)} required />
+                            <input
+                                id={`${type}IgnoreDateLabelPrint`}
+                                type='checkbox'
+                                autoComplete='off'
+                                checked={pipelineState.ignoreDateLabelPrint}
+                                onChange={(event) => setPipelineState({ ...pipelineState, ignoreDateLabelPrint: event.target.checked })}
+                            />
+                            <label
+                                htmlFor={`${type}IgnoreDateLabelPrint`}
+                            >Ignore dateLabelPrint field</label>
                         </div>
+                    }
+                    { (type === 'addresses') &&
                         <div className='subtaskSetting'>
-                            <label htmlFor='maxDate'>Maximum Date:</label>
-                            <input id='maxDate' type='date' value={maxDate} onChange={(e) => setMaxDate(e.target.value)} required />
+                            <input
+                                id={`${type}IncludeUnprintedRows`}
+                                type='checkbox'
+                                autoComplete='off'
+                                checked={includeUnprintedRows}
+                                onChange={(event) => setIncludeUnprintedRows(event.target.checked)}
+                            />
+                            <label
+                                htmlFor={`${type}IncludeUnprintedRows`}
+                            >Output occurrences with blank dateLabelPrint field</label>
                         </div>
-                    </>
-                }
-                { (type === 'labels') &&
-                    <div className='subtaskSetting'>
-                        <input
-                            id={`${type}IgnoreDateLabelPrint`}
-                            type='checkbox'
-                            autoComplete='off'
-                            checked={pipelineState.ignoreDateLabelPrint}
-                            onChange={(event) => setPipelineState({ ...pipelineState, ignoreDateLabelPrint: event.target.checked })}
-                        />
-                        <label>Ignore dateLabelPrint field</label>
-                    </div>
-                }
-                { (type === 'addresses') &&
-                    <div className='subtaskSetting'>
-                        <input
-                            id={`${type}IncludeUnprintedRows`}
-                            type='checkbox'
-                            autoComplete='off'
-                            checked={includeUnprintedRows}
-                            onChange={(event) => setIncludeUnprintedRows(event.target.checked)}
-                        />
-                        <label>Output occurrences with blank dateLabelPrint field</label>
-                    </div>
-                }
-                { taskState.subtaskIO[type].outputs.includes('occurrences') &&
-                    <div className='subtaskSetting'>
-                        <input
-                            id={`${type}ExcludeOutput`}
-                            type='checkbox'
-                            autoComplete='off'
-                            checked={excludeOutput}
-                            onChange={(event) => setExcludeOutput(event.target.checked)}
-                        />
-                        <label>Exclude output from database</label>
-                    </div>
-                }
+                    }
+                    { taskState.subtaskIO[type].outputs.includes('occurrences') &&
+                        <div className='subtaskSetting'>
+                            <input
+                                id={`${type}ExcludeOutput`}
+                                type='checkbox'
+                                autoComplete='off'
+                                checked={excludeOutput}
+                                onChange={(event) => setExcludeOutput(event.target.checked)}
+                            />
+                            <label
+                                htmlFor={`${type}ExcludeOutput`}
+                            >Exclude output from database</label>
+                        </div>
+                    }
+                </fieldset>
                 { excludeOutput &&
                     <p>
                         <span className='excludeOutputNotice'>Notice: </span>

@@ -17,15 +17,6 @@ const SubtaskIOPanelContainer = styled.div`
         flex-direction: column;
         gap: 5px;
 
-        legend {
-            margin-bottom: 2px;
-
-            padding: 0px;
-
-            font-size: 12pt;
-            font-weight: bold;
-        }
-
         div {
             display: flex;
             flex-direction: row;
