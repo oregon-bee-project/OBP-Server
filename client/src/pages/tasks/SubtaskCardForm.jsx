@@ -81,6 +81,8 @@ export default function SubtaskCardForm({ type, taskState, pipelineState, setPip
     const [ minDate, setMinDate ] = useState(firstDayFormatted)
     const [ maxDate, setMaxDate ] = useState(currentDateFormatted)
     const [ excludeOutput, setExcludeOutput ] = useState(false)
+    const [ includeUnprintedRows, setIncludeUnprintedRows ] = useState(false)
+    const [ ignoreDateLabelPrint, setIgnoreDateLabelPrint ] = useState(false)
 
     const descriptions = {
         'occurrences': 'Formats and updates an occurrences file',
@@ -117,9 +119,8 @@ export default function SubtaskCardForm({ type, taskState, pipelineState, setPip
                         </div>
                     </>
                 }
-                { (type === 'labels' || type === 'addresses') &&
+                { (type === 'labels') &&
                     <div className='subtaskSetting'>
-                        <label>Ignore dateLabelPrint field:</label>
                         <input
                             id={`${type}IgnoreDateLabelPrint`}
                             type='checkbox'
@@ -127,11 +128,23 @@ export default function SubtaskCardForm({ type, taskState, pipelineState, setPip
                             checked={pipelineState.ignoreDateLabelPrint}
                             onChange={(event) => setPipelineState({ ...pipelineState, ignoreDateLabelPrint: event.target.checked })}
                         />
+                        <label>Ignore dateLabelPrint field</label>
+                    </div>
+                }
+                { (type === 'addresses') &&
+                    <div className='subtaskSetting'>
+                        <input
+                            id={`${type}IncludeUnprintedRows`}
+                            type='checkbox'
+                            autoComplete='off'
+                            checked={includeUnprintedRows}
+                            onChange={(event) => setIncludeUnprintedRows(event.target.checked)}
+                        />
+                        <label>Output occurrences with blank dateLabelPrint field</label>
                     </div>
                 }
                 { taskState.subtaskIO[type].outputs.includes('occurrences') &&
                     <div className='subtaskSetting'>
-                        <label>Exclude output from database:</label>
                         <input
                             id={`${type}ExcludeOutput`}
                             type='checkbox'
@@ -139,6 +152,7 @@ export default function SubtaskCardForm({ type, taskState, pipelineState, setPip
                             checked={excludeOutput}
                             onChange={(event) => setExcludeOutput(event.target.checked)}
                         />
+                        <label>Exclude output from database</label>
                     </div>
                 }
                 { excludeOutput &&

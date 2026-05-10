@@ -1,5 +1,5 @@
 import BaseSubtaskHandler from './BaseSubtaskHandler.js'
-import { fieldNames, fileLimits, requiredFields, usernames } from '../../shared/lib/utils/constants.js'
+import { fieldNames, fileLimits, usernames } from '../../shared/lib/utils/constants.js'
 import { OccurrenceService, TaskService, UsernamesService } from '../../shared/lib/services/index.js'
 import FileManager from '../../shared/lib/utils/FileManager.js'
 
@@ -90,7 +90,11 @@ export default class AddressesSubtaskHandler extends BaseSubtaskHandler {
                                 .filter((userLogin) => !!userLogin)
 
         // Get printable occurrences with known user data; extract iNaturalist aliases (userLogins)
-        const printableOccurrences = await OccurrenceService.getPrintableOccurrences({ userLogins: userLogins, scratch: true, ignoreDateLabelPrint: subtask.ignoreDateLabelPrint })
+        let printableOccurrences = await OccurrenceService.getPrintableOccurrences({ userLogins: userLogins, scratch: true, ignoreDateLabelPrint: true })
+        // In most cases, we only want to output rows which have already been printed
+        if (!subtask.includeUnprintedRows) {
+            printableOccurrences = printableOccurrences.filter(v => v.dateLabelPrint)
+        }
         const aliases = printableOccurrences.map((occurrence) => occurrence[fieldNames.iNaturalistAlias])
                                             .filter((alias) => !!alias)
         

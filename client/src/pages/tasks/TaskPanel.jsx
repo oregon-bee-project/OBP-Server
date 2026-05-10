@@ -157,7 +157,7 @@ export default function TaskPanel() {
 
             // Add addresses subtask settings
             if (type === 'addresses') {
-                subtask.ignoreDateLabelPrint = event.target.addressesIgnoreDateLabelPrint.checked
+                subtask.includeUnprintedRows = event.target.addressesIncludeUnprintedRows.checked
             }
 
             const excludeOutput = event.target[`${type}ExcludeOutput`]?.checked
