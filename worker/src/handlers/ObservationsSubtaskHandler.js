@@ -42,6 +42,14 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
                 const occurrence = OccurrenceService.createOccurrenceFromObservation(observation, elevations, true)
                 await updateProgress(100 * (++observationIndex) / observationsPage.pagination.totalDocuments)
 
+                // This seems like the key part -- if this conditional is entered,
+                //  then we'll *attempt* to insert the observation as an occurrence
+                //  That may "fail" later if it resolves as a duplicate.
+                // Question - how do existing occurrences get updates with this model?
+                // Where does the fieldNumber come from? Maybe the internal _id is resolved
+                //  as some new value which "inserts a new occurrence", which means
+                //  the "old occurrence" gets deleted later?
+
                 // specimenId is initially set to the number of bees collected
                 // Duplicate observations a number of times equal to this value and overwrite specimenId to index the duplications
                 const beesCollected = parseInt(occurrence[fieldNames.specimenId])
@@ -216,6 +224,8 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
         // Delete old observations (from previous tasks)
         await ObservationService.deleteObservations()
 
+        // Inserts *all* observations into the Observations repository via
+        //  createMany() in obs service .js
         await ObservationService.pullObservations(
             subtask.sources,
             subtask.minDate,

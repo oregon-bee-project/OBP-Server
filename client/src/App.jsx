@@ -5,6 +5,8 @@ import { Outlet, useNavigate } from 'react-router'
 import { useAuth } from './AuthProvider.jsx'
 import { FlowProvider } from './FlowProvider.jsx'
 
+const devUsers = ['nora', 'dev']
+
 const AppContainer = styled.div`
     display: flex;
     flex-direction: column;
@@ -22,7 +24,9 @@ const AppContainer = styled.div`
 
         white-space: nowrap;
 
-        background-color: #222;
+        background-color: ${props => devUsers.includes(props.admin) ? 
+            `#33004e` 
+            : `#222` };
 
         #appTitleText {
             display: flex;
@@ -93,8 +97,8 @@ function App({ children }) {
     const navigate = useNavigate()
 
     return (
-        <AppContainer>
-            <header>
+        <AppContainer admin={admin}>
+            <header id='head-banner'>
                 <div id='appTitleText'>
                     <div id='appTitle' onClick={() => navigate('/') }>
                         <h1>Beeline</h1>
