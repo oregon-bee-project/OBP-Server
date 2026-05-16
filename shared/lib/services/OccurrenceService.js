@@ -2,7 +2,7 @@ import Crypto from 'node:crypto'
 
 import { OccurrenceRepository } from '../repositories/index.js'
 import { fieldNames, template, nonEmptyFields, ofvs, abbreviations, determinations, requiredFields } from '../utils/constants.js'
-import { includesStreetSuffix, getDayOfYear, getOFV } from '../utils/utilities.js'
+import { includesIllegalSuffix, getDayOfYear, getOFV } from '../utils/utilities.js'
 import ElevationService from './ElevationService.js'
 import PlacesService from './PlacesService.js'
 import PlantTaxaService from './PlantTaxaService.js'
@@ -31,8 +31,13 @@ class OccurrenceService {
         if (updatedOccurrence[fieldNames.country]?.length > 3) { errorFields.push(fieldNames.country) }
         if (updatedOccurrence[fieldNames.stateProvince]?.length > 2) { errorFields.push(fieldNames.stateProvince) }
 
-        // Flag locality if it contains street suffixes or is too long
-        if (includesStreetSuffix(updatedOccurrence[fieldNames.locality]) || updatedOccurrence[fieldNames.locality]?.length > 18) {
+        // Flag locality if it contains street/county suffixes, 
+        //  has illegal characters, or is too long
+        if (
+            includesIllegalSuffix(updatedOccurrence[fieldNames.locality]) 
+            || /[,"]/.test(updatedOccurrence[fieldNames.locality])
+            || updatedOccurrence[fieldNames.locality]?.length > 18
+        ) {
             errorFields.push(fieldNames.locality)
         }
 
@@ -270,18 +275,18 @@ class OccurrenceService {
         return results
     }
 
-
     /*
      * parseLocalityFromPlaceGuess()
-     * Returns the locality from a iNaturalist observation's place_guess field
+     * Returns a formatted locality from a iNaturalist observation's 
+     *  place_guess field if it's valid, or the whole place_guess field
+     *  surrounded in quotes if it's invalid
      */
     parseLocalityFromPlaceGuess(place_guess) {
-        // Format the location
-        // Remove 'County' or 'Co' or 'Co.' from the county field (case insensitive)
-        const countyRegex = new RegExp(/(?<![^,.\s])Co(?:unty)?\.?(?![^,.\s])+/ig)
-        const formattedLocality = place_guess
-            ?.split(/,\s*/)?.at(0)?.replace(countyRegex, '')?.trim() ?? ''
-        return formattedLocality
+        const splitGuess = place_guess ?.split(/,\s*/)
+        const locality = splitGuess?.length === 3 
+            ? splitGuess?.at(0).trim()
+            : `"${place_guess?.trim() ?? ''}""`
+        return locality
     }
 
     /*

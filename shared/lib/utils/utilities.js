@@ -5,10 +5,10 @@ import { tokens } from '../config/environment.js'
 import { InvalidArgumentError, ValidationError } from './errors.js'
 
 /*
- * includesStreetSuffix()
+ * includesIllegalSuffix()
  * A boolean function that returns whether a given string contains a street suffix (Road, Rd, Street, St, etc.)
  */
-function includesStreetSuffix(string) {
+function includesIllegalSuffix(string) {
     if (!string || typeof string !== 'string') { return false }
     // A list of RegExps to detect street suffixes
     const streetSuffixRegexes = [
@@ -18,7 +18,8 @@ function includesStreetSuffix(string) {
         'Dr(?:ive)?',                   // Drive, Dr
         'Blvd|Boulevard',               // Boulevard, Blvd
         'C(?:our)?t',                   // Court, Ct
-        'Ln|Lane'                       // Lane, Ln
+        'Ln|Lane',                      // Lane, Ln
+        'County'                        // County
     ].map((regex) => new RegExp(`(?<![^,.\\s])${regex}(?![^,.\\s])`, 'i'))
 
     return streetSuffixRegexes.some((regex) => regex.test(string))
@@ -257,4 +258,4 @@ function decryptObject(encryptedObject) {
     return JSON.parse(decrypted.toString('utf8'))
 }
 
-export { includesStreetSuffix, getDayOfYear, delay, getOFV, parseQueryParameters, parseSubtasks, encryptObject, decryptObject }
+export { includesIllegalSuffix, getDayOfYear, delay, getOFV, parseQueryParameters, parseSubtasks, encryptObject, decryptObject }
