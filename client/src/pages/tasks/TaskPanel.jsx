@@ -143,6 +143,10 @@ export default function TaskPanel() {
                 subtask.query = subtaskQuery
             }
 
+            if (type === 'occurrences') {
+                subtask.overwriteValidLocations = event.target.occurrencesOverwriteValidLocations.checked
+            }
+
             // Add observations subtask settings
             if (type === 'observations') {
                 subtask.sources = event.target.sources.value
@@ -161,7 +165,6 @@ export default function TaskPanel() {
             }
 
             const excludeOutput = event.target[`${type}ExcludeOutput`]?.checked
-            console.log(excludeOutput)
             if (excludeOutput) {
                 subtask.excludeOutput = excludeOutput
             }

@@ -25,8 +25,7 @@ export default class OccurrencesSubtaskHandler extends BaseSubtaskHandler {
      * #updateOccurrencesFromObservations()
      * Updates existing occurrences using matching observations from the database
      */
-    async #updateOccurrencesFromObservations(elevations, updateProgress) {
-        await updateProgress(0)
+    async #updateOccurrencesFromObservations(elevations, updateProgress, overwriteValidLocations = false) {
 
         // Query occurrences page-by-page to avoid memory constraints
         let pageNumber = 1
@@ -41,7 +40,8 @@ export default class OccurrencesSubtaskHandler extends BaseSubtaskHandler {
                 positional_accuracy: 1,
                 geojson: 1,
                 taxon: 1,
-                uri: 1
+                uri: 1,
+                place_guess: 1
             }
         }
         let occurrencesResults = await OccurrenceService.getOccurrencesPage({ page: pageNumber, filter: occurrencesFilter })
@@ -55,7 +55,7 @@ export default class OccurrencesSubtaskHandler extends BaseSubtaskHandler {
                 const matchingObservation = urlMap[occurrence[fieldNames.iNaturalistUrl]]
                 if (matchingObservation) {
                     // Update the occurrence data from the matching observation
-                    await OccurrenceService.updateOccurrenceFromObservation(occurrence, matchingObservation, elevations)
+                    await OccurrenceService.updateOccurrenceFromObservation(occurrence, matchingObservation, elevations, { overwriteValidLocations })
                 }
 
                 await updateProgress(100 * (++occurrenceIndex) / occurrencesResults.pagination.totalDocuments)
@@ -274,6 +274,7 @@ export default class OccurrencesSubtaskHandler extends BaseSubtaskHandler {
         // Update places.json and taxa.json from observations table
         await TaskService.logTaskStep(taskId, 'Updating place data')
 
+        // Everything goes as expected here, nothing new. Followed by a crash.
         await PlacesService.updatePlacesFromObservations(observations, this.#createUpdateProgressFn(taskId))
 
         await TaskService.logTaskStep(taskId, 'Updating taxonomy data')
@@ -293,7 +294,7 @@ export default class OccurrencesSubtaskHandler extends BaseSubtaskHandler {
         // Update existing occurrence data from its corresponding observations
         await TaskService.logTaskStep(taskId, 'Updating occurrence data from iNaturalist observations')
 
-        await this.#updateOccurrencesFromObservations(elevations, this.#createUpdateProgressFn(taskId))
+        await this.#updateOccurrencesFromObservations(elevations, this.#createUpdateProgressFn(taskId), subtask.overwriteValidLocations)
 
         // Add new occurrence data from bee increases
         await TaskService.logTaskStep(taskId, 'Adding new occurrence data from bee increases')

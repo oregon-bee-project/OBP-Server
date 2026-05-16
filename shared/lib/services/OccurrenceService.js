@@ -270,6 +270,20 @@ class OccurrenceService {
         return results
     }
 
+
+    /*
+     * parseLocalityFromPlaceGuess()
+     * Returns the locality from a iNaturalist observation's place_guess field
+     */
+    parseLocalityFromPlaceGuess(place_guess) {
+        // Format the location
+        // Remove 'County' or 'Co' or 'Co.' from the county field (case insensitive)
+        const countyRegex = new RegExp(/(?<![^,.\s])Co(?:unty)?\.?(?![^,.\s])+/ig)
+        const formattedLocality = place_guess
+            ?.split(/,\s*/)?.at(0)?.replace(countyRegex, '')?.trim() ?? ''
+        return formattedLocality
+    }
+
     /*
      * createOccurrenceFromObservation()
      * Creates a formatted occurrence from an iNaturalist observation (and place, taxonomy, elevation, and user data); does not insert the occurrence
@@ -318,10 +332,7 @@ class OccurrenceService {
         const formattedMonth = !isNaN(observedMonth) ? observedMonth.toString() : ''
         const formattedYear = !isNaN(observedYear) ? observedYear.toString() : ''
         
-        // Format the location
-        // Remove 'County' or 'Co' or 'Co.' from the county field (case insensitive)
-        const countyRegex = new RegExp(/(?<![^,.\s])Co(?:unty)?\.?(?![^,.\s])+/ig)
-        const formattedLocality = observation.place_guess?.split(/,\s*/)?.at(0)?.replace(countyRegex, '')?.trim() ?? ''
+        const formattedLocality = this.parseLocalityFromPlaceGuess(observation.place_guess)
 
         // Format the coordinates
         const formattedLatitude = observation.geojson?.coordinates?.at(1)?.toFixed(4)?.toString() ?? ''
@@ -864,7 +875,12 @@ class OccurrenceService {
     * updateOccurrenceFromObservation()
     * Updates specific values (location, elevation, and taxonomy) in an existing occurrence from its corresponding iNaturalist observation
     */
-    async updateOccurrenceFromObservation(occurrence, observation, elevations) {
+    async updateOccurrenceFromObservation(occurrence, observation, elevations, 
+        options = { overwriteValidLocations: false }) {
+        const {
+            overwriteValidLocations: overwriteValidLocations = false,
+        } = options
+
         if (!occurrence) return
 
         let updateDocument = { ...occurrence }
@@ -873,24 +889,22 @@ class OccurrenceService {
         const coordinate = `${occurrence[fieldNames.latitude]},${occurrence[fieldNames.longitude]}`
         updateDocument[fieldNames.elevation] = elevations[coordinate] || ''
 
-        // Update the coordinate fields if the accuracy is better (smaller) or as good
+        // Update the coordinate fields if overwriting
         // Treat an empty accuracy as perfect precision
-        const prevAccuracy = parseInt(occurrence[fieldNames.accuracy]) || ''
-        const newAccuracy = observation?.positional_accuracy ?? ''
-        if (newAccuracy === '' || newAccuracy < prevAccuracy) {
-            const prevLatitude = occurrence[fieldNames.latitude]
-            const prevLongitude = occurrence[fieldNames.longitude]
+        if (overwriteValidLocations) {
             const newLatitude = observation?.geojson?.coordinates?.at(1)?.toFixed(4)?.toString() || ''
             const newLongitude = observation?.geojson?.coordinates?.at(0)?.toFixed(4)?.toString() || ''
             const newCoordinate = `${newLatitude},${newLongitude}`
+            const newAccuracy = observation?.positional_accuracy ?? ''
+            const newLocality = this.parseLocalityFromPlaceGuess(observation?.place_guess)
 
             // Check that either coordinate changed before updating the occurrence fields
-            if (newLatitude !== prevLatitude || newLongitude !== prevLongitude) {
-                updateDocument[fieldNames.elevation] = elevations[newCoordinate] || await ElevationService.getElevation(newLatitude, newLongitude) || ''
-                updateDocument[fieldNames.latitude] = newLatitude
-                updateDocument[fieldNames.longitude] = newLongitude
-                updateDocument[fieldNames.accuracy] = newAccuracy.toString() || ''
-            }
+            updateDocument[fieldNames.elevation] = elevations[newCoordinate] 
+                || await ElevationService.getElevation(newLatitude, newLongitude) || ''
+            updateDocument[fieldNames.latitude] = newLatitude
+            updateDocument[fieldNames.longitude] = newLongitude
+            updateDocument[fieldNames.accuracy] = newAccuracy.toString() || ''
+            updateDocument[fieldNames.locality] = newLocality || occurrence?.locality || ''
         }
 
         if (observation) {

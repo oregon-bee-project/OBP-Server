@@ -97,6 +97,7 @@ export default function SubtaskCardForm({ type, taskState, pipelineState, setPip
     const [ maxDate, setMaxDate ] = useState(currentDateFormatted)
     const [ excludeOutput, setExcludeOutput ] = useState(false)
     const [ includeUnprintedRows, setIncludeUnprintedRows ] = useState(false)
+    const [ overwriteValidLocations, setOverwriteValidLocations ] = useState(false)
 
     const descriptions = {
         'occurrences': 'Formats and updates an occurrences file',
@@ -121,6 +122,20 @@ export default function SubtaskCardForm({ type, taskState, pipelineState, setPip
                 <fieldset className="subtaskSettingsFieldset">
                     { subtasksWithSettings.includes(type) &&
                         <legend>Subtask settings:</legend>
+                    }
+                    { (type === 'occurrences') &&
+                        <div className='subtaskSetting'>
+                            <input
+                                id={`${type}OverwriteValidLocations`}
+                                type='checkbox'
+                                autoComplete='off'
+                                checked={overwriteValidLocations}
+                                onChange={(event) => setOverwriteValidLocations(event.target.checked)}
+                            />
+                            <label
+                                htmlFor={`${type}OverwriteValidLocations`}
+                            >Overwrite valid GPS coordinates and localities</label>
+                        </div>
                     }
                     { type === 'observations' &&
                         <>
