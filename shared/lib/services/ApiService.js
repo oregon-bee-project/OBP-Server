@@ -12,27 +12,60 @@ class ApiService {
         this.backoffLimitMs = 8000
         this.defaultPageSize = 200
         this.iNaturalistApiToken = ''
+        this.iNaturalistApiTokenExpiresAt = 0
+    }
+
+    // Decode a JWT's 'exp' claim (as milliseconds since epoch) without verifying its signature
+    // Returns 0 if the token cannot be parsed
+    #getApiTokenExpiry(token) {
+        try {
+            const payload = token.split('.')[1]
+            const { exp } = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+            return Number.isFinite(exp) ? exp * 1000 : 0
+        } catch {
+            return 0
+        }
     }
 
     async fetchINaturalistApiToken() {
-        // Read an OAuth access token from the local file
+        // iNaturalist API tokens are JWTs valid for ~24 hours; reuse the cached token until it nears
+        // expiration (60-second safety margin) instead of minting a new one on every request
+        if (this.iNaturalistApiToken && Date.now() < this.iNaturalistApiTokenExpiresAt - 60_000) {
+            return this.iNaturalistApiToken
+        }
+
+        // The cached token is missing or (nearly) expired; reset it before attempting to fetch a new one
+        this.iNaturalistApiToken = ''
+        this.iNaturalistApiTokenExpiresAt = 0
+
+        // Read the stored OAuth access token from the local file
         const { encryptedToken } = FileManager.readJSON(path.resolve('./shared/data/iNaturalistToken.json'), { encryptedToken: {} })
         const access_token = decryptObject(encryptedToken)
 
-        if (access_token) {
-            // Request a temporary API token from iNaturalist
-            const config = {
-                headers: { 'Authorization': `Bearer ${access_token}` }
-            }
-            
-            const response = await fetch('https://www.inaturalist.org/users/api_token', config)
-
-            if (response['content-type']?.includes('application/json')) {
-                const json = await response.json()
-                this.iNaturalistApiToken = json.api_token ?? ''
-            }
+        if (!access_token) {
+            console.error('No iNaturalist OAuth access token found; API requests will be unauthenticated')
+            return this.iNaturalistApiToken
         }
-        
+
+        // Exchange the OAuth access token for a temporary API token
+        try {
+            const response = await fetch('https://www.inaturalist.org/users/api_token', {
+                headers: { 'Authorization': `Bearer ${access_token}` }
+            })
+
+            if (!response.ok) {
+                console.error(`Failed to fetch iNaturalist API token: ${response.status} ${response.statusText}`)
+                return this.iNaturalistApiToken
+            }
+
+            const { api_token } = await response.json()
+            this.iNaturalistApiToken = api_token ?? ''
+            // Fall back to a conservative 12-hour lifetime if the expiration cannot be read from the token
+            this.iNaturalistApiTokenExpiresAt = this.#getApiTokenExpiry(this.iNaturalistApiToken) || (Date.now() + 12 * 60 * 60 * 1000)
+        } catch (error) {
+            console.error('Error while fetching iNaturalist API token:', error)
+        }
+
         return this.iNaturalistApiToken
     }
 
