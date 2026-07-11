@@ -160,7 +160,8 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
         // Input and output file names
         
         // If using the upload (and it exists), set the input file to its file path
-        let inputFilePath = subtask.input === 'upload' && task.upload?.filePath ? task.upload.filePath : ''
+        let inputFilePath = subtask.input === 'upload' && task.upload?.filePath 
+            ? task.upload.filePath : ''
         // If using an input file that is not the upload file, try to find the specified input file in the previous subtask outputs
         if (subtask.input !== 'none' && subtask.input !== 'selection' && subtask.input !== 'upload') {
             const subtaskInputSplit = subtask.input?.split('_') ?? []
@@ -180,7 +181,8 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
             '99706': 'MM',
             '166376': 'WaBA'
         }
-        const sourceString = subtask.sources?.map((id) => sourceAbbreviations[id] ?? id)?.join('_') || 'merged'
+        const sourceString = subtask.sources?.map((id) => sourceAbbreviations[id] ?? id)
+            ?.join('_') || 'merged'
 
         const occurrencesFileName = `occurrences_${sourceString}_${task.tag}.csv`
         const occurrencesFilePath = './shared/data/occurrences/' + occurrencesFileName
@@ -188,26 +190,33 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
         const pullsFilePath = './shared/data/pulls/' + pullsFileName
         const flagsFileName = `flags_${task.tag}.csv`
         const flagsFilePath = './shared/data/flags/' + flagsFileName
+        // const obscuredFileName = `obscured_${task.tag}.csv`
+        // const obscuredFilePath = `./shared/data/obscured/` 
 
         await TaskService.logTaskStep(taskId, 'Formatting and uploading provided dataset')
 
         // Delete old scratch space occurrences (from previous tasks)
         await OccurrenceService.deleteOccurrences({ scratch: true })
 
-        if (inputFilePath) {   // subtask.input is either 'upload' or a previous subtask's output file
+        // subtask.input is either 'upload' or a previous subtask's output file
+        if (inputFilePath) {   
             if (subtask.excludeOutput) {
                 // Insert new occurrences from the input file into scratch space; ignore existing occurrences
-                await OccurrenceService.createOccurrencesFromFile(inputFilePath, { scratch: true })
+                await OccurrenceService.createOccurrencesFromFile(inputFilePath,
+                    { scratch: true })
             } else {
                 // Upsert data from the input occurrence file into scratch space (existing records will be moved to scratch space)
-                await OccurrenceService.upsertOccurrencesFromFile(inputFilePath, { scratch: true })
+                await OccurrenceService.upsertOccurrencesFromFile(inputFilePath,
+                    { scratch: true })
             }
+
+        // Existing occurrences are not allowed to be excluded from the database
+        // The scratch space will be empty if input === 'selection' and excludeOutput === true
         } else if (subtask.input === 'selection' && !subtask.excludeOutput) {
-            // Existing occurrences are not allowed to be excluded from the database
-            // The scratch space will be empty if input === 'selection' and excludeOutput === true
 
             // Move occurrences matching the query parameters into scratch space
-            await OccurrenceService.updateOccurrences(subtask.params?.filter ?? {}, { scratch: true })
+            await OccurrenceService.updateOccurrences(subtask.params?.filter ?? {},
+                { scratch: true })
         }
 
         // Pull new iNaturalist observations and insert them
@@ -227,11 +236,14 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
         // Update places.json and taxa.json from observations table
         await TaskService.logTaskStep(taskId, 'Updating place data')
 
-        await PlacesService.updatePlacesFromObservations(observations, this.#createUpdateProgressFn(taskId))
+        await PlacesService.updatePlacesFromObservations(observations,
+            this.#createUpdateProgressFn(taskId))
 
         await TaskService.logTaskStep(taskId, 'Updating taxonomy data')
 
-        await PlantTaxaService.updateTaxaFromObservations(observations, this.#createUpdateProgressFn(taskId))
+        await PlantTaxaService.updateTaxaFromObservations(observations,
+            this.#createUpdateProgressFn(taskId))
+
 
         // Update usernames data in memory
         UsernamesService.readUsernames()
@@ -242,7 +254,8 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
         // Read all elevation data
         await TaskService.logTaskStep(taskId, `Reading ${coordinates.length} elevations`)
 
-        const elevations = await ElevationService.getElevations(coordinates, this.#createUpdateProgressFn(taskId))
+        const elevations = await ElevationService.getElevations(coordinates,
+            this.#createUpdateProgressFn(taskId))
 
         // Add new occurrence data from pulled observations
         await TaskService.logTaskStep(taskId, 'Adding new occurrence data from iNaturalist observations')
@@ -268,7 +281,7 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
         }
         await OccurrenceService.writeOccurrencesFromDatabase(occurrencesFilePath, occurrencesFilter)
 
-        await TaskService.updateProgressPercentageById(taskId, 100 / 3)
+        await TaskService.updateProgressPercentageById(taskId, 100 / 4)
         
         // Write unprinted, flagged scratch space occurrences to the flags output file
         const flagsFilter = {
@@ -281,7 +294,7 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
         }
         await OccurrenceService.writeOccurrencesFromDatabase(flagsFilePath, flagsFilter)
 
-        await TaskService.updateProgressPercentageById(taskId, 100 * 2 / 3)
+        await TaskService.updateProgressPercentageById(taskId, 100 * 2 / 4)
 
         // Write new unflagged scratch space occurrences to the pulls output file
         const pullsFilter = {
@@ -293,6 +306,7 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
             ]
         }
         await OccurrenceService.writeOccurrencesFromDatabase(pullsFilePath, pullsFilter)
+
 
         await TaskService.updateProgressPercentageById(taskId, 100)
 
