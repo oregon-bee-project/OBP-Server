@@ -190,11 +190,8 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
         const pullsFilePath = './shared/data/pulls/' + pullsFileName
         const flagsFileName = `flags_${task.tag}.csv`
         const flagsFilePath = './shared/data/flags/' + flagsFileName
-        // const obscuredFileName = `obscured_${task.tag}.csv`
-        // const obscuredFilePath = `./shared/data/obscured/` 
 
         await TaskService.logTaskStep(taskId, 'Formatting and uploading provided dataset')
-
         // Delete old scratch space occurrences (from previous tasks)
         await OccurrenceService.deleteOccurrences({ scratch: true })
 
@@ -281,7 +278,7 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
         }
         await OccurrenceService.writeOccurrencesFromDatabase(occurrencesFilePath, occurrencesFilter)
 
-        await TaskService.updateProgressPercentageById(taskId, 100 / 4)
+        await TaskService.updateProgressPercentageById(taskId, 100 / 3)
         
         // Write unprinted, flagged scratch space occurrences to the flags output file
         const flagsFilter = {
@@ -294,7 +291,7 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
         }
         await OccurrenceService.writeOccurrencesFromDatabase(flagsFilePath, flagsFilter)
 
-        await TaskService.updateProgressPercentageById(taskId, 100 * 2 / 4)
+        await TaskService.updateProgressPercentageById(taskId, 100 * 2 / 3)
 
         // Write new unflagged scratch space occurrences to the pulls output file
         const pullsFilter = {
