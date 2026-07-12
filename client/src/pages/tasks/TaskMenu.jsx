@@ -136,7 +136,8 @@ export default function TaskMenu({ taskState, setTaskState, selectedTaskId, setS
         'emails',
         'pivots',
         'labels',
-        'addresses'
+        'addresses',
+        'overwrite'
     ]
 
     /* Queries */
