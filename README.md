@@ -19,10 +19,11 @@ Everything under `shared/data/` is gitignored (see [`.gitignore`](.gitignore)), 
    ```
 2. Create the seed and lookup files:
    ```
-   touch workingOccurrences.csv backupOccurrences.csv plantList.csv usernames.csv
+   touch workingOccurrences.csv backupOccurrences.csv plantList.csv
+   cp usernames.example.csv usernames.csv
    ```
    - `workingOccurrences.csv` seeds the occurrences collection when the database is empty on startup ([`server/src/index.js`](server/src/index.js)).
-   - `usernames.csv` maps each occurrence's `userLogin` to a volunteer's contact info ([`shared/lib/services/UsernamesService.js`](shared/lib/services/UsernamesService.js)). Without it, every record from the Observations subtask gets a name error flag and never enters the occurrences collection.
+   - `usernames.csv` maps each occurrence's `userLogin` to a volunteer's contact info ([`shared/lib/services/UsernamesService.js`](shared/lib/services/UsernamesService.js)). Without it, every record from the Observations subtask gets a name error flag and never enters the occurrences collection. [`usernames.example.csv`](shared/data/usernames.example.csv) is a two-row sample showing the format; replace it with a populated copy from an Administrator login at melittologist.org.
    - `plantList.csv` is the Oregon Bee Project plant list served by the plant-list endpoints. (The related iNaturalist taxonomy cache, `plantTaxa.json`, is created automatically.)
 3. **Optional — elevation data.** To fill the `elevation` field on pulled records, download 1-arc-second GeoTIFF tiles from the [USGS Earth Explorer](https://www.usgs.gov/faqs/where-can-i-get-global-elevation-data#faq) and unzip them into `shared/data/elevation/` ([`shared/lib/services/ElevationService.js`](shared/lib/services/ElevationService.js)). Skip this if you don't need elevation.
 
