@@ -81,7 +81,6 @@ const OBS_LONGITUDE = 'longitude'
 const USER_ID = 'user_id'
 const USER_LOGIN = 'user_login'
 const PLACE_GUESS = 'place_guess'
-const OBS_GEOPRIVACY = 'geoprivacy'
 
 // Plant field names
 const PLANT_LIST_SCIENTIFIC_NAME = 'Scientific_name'
@@ -272,7 +271,8 @@ const constants = {
             [VOL_DET_GENUS]: '',
             [VOL_DET_SPECIES]: '',
             [VOL_DET_SEX]: '',
-            [VOL_DET_CASTE]: ''
+            [VOL_DET_CASTE]: '',
+            [GEOPRIVACY]: '',
         },
         // A list of fields that should be flagged if empty
         nonEmptyFields: [
@@ -324,8 +324,7 @@ const constants = {
             longitude: OBS_LONGITUDE,
             userId: USER_ID,
             userLogin: USER_LOGIN,
-            placeGuess: PLACE_GUESS,
-            geoprivacy: OBS_GEOPRIVACY
+            placeGuess: PLACE_GUESS
         },
         // Template object for observation CSV rows
         template: {
