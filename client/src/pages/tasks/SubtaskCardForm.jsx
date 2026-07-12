@@ -142,11 +142,11 @@ export default function SubtaskCardForm({ type, taskState, pipelineState, setPip
                             <ProjectSelection />
                             
                             <div className='subtaskSetting'>
-                                <label htmlFor='minDate'>Minimum Date:</label>
+                                <label htmlFor='minDate'>From:</label>
                                 <input id='minDate' type='date' value={minDate} onChange={(e) => setMinDate(e.target.value)} required />
                             </div>
                             <div className='subtaskSetting'>
-                                <label htmlFor='maxDate'>Maximum Date:</label>
+                                <label htmlFor='maxDate'>Through:</label>
                                 <input id='maxDate' type='date' value={maxDate} onChange={(e) => setMaxDate(e.target.value)} required />
                             </div>
                         </>
