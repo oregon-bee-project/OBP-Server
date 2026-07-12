@@ -21,6 +21,7 @@ class ObservationService {
             'taxon',
             'ofvs',
             'uri',
+            'geoprivacy',
             'geojson',
             'user',
             'place_guess',

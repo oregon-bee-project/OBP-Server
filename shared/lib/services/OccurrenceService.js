@@ -27,6 +27,11 @@ class OccurrenceService {
         // A list of fields to flag in addition to the non-empty fields
         let errorFields = []
 
+        // Record has an obscured or private geojson
+        if (updatedOccurrence[fieldNames.geoprivacy]) {
+            errorFields.push(fieldNames.geoprivacy)
+        }
+
         // Flag country and state if they are too long (unabbreviated)
         if (updatedOccurrence[fieldNames.country]?.length > 3) { errorFields.push(fieldNames.country) }
         if (updatedOccurrence[fieldNames.stateProvince]?.length > 2) { errorFields.push(fieldNames.stateProvince) }
@@ -399,6 +404,7 @@ class OccurrenceService {
         occurrence[fieldNames.plantTaxonRank] = observation.taxon?.rank || minRank || ''
 
         occurrence[fieldNames.iNaturalistUrl] = observation.uri ?? ''
+        occurrence[fieldNames.geoprivacy] = observation.geoprivacy
 
         // Set error flags
         occurrence = this.updateErrorFlags(occurrence)

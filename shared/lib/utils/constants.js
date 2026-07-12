@@ -59,6 +59,7 @@ const VOL_DET_GENUS = 'genusVolDet'
 const VOL_DET_SPECIES = 'speciesVolDet'
 const VOL_DET_SEX = 'sexVolDet'
 const VOL_DET_CASTE = 'casteVolDet'
+const GEOPRIVACY = 'geoprivacy'
 
 // Observation field names
 const UUID = 'uuid'
@@ -206,7 +207,8 @@ const constants = {
             volDetGenus: VOL_DET_GENUS,
             volDetSpecies: VOL_DET_SPECIES,
             volDetSex: VOL_DET_SEX,
-            volDetCaste: VOL_DET_CASTE
+            volDetCaste: VOL_DET_CASTE,
+            geoprivacy: GEOPRIVACY
         },
         // Template object for occurrences; static values are provided as strings, data-dependent values are set to null
         template: {
@@ -269,7 +271,8 @@ const constants = {
             [VOL_DET_GENUS]: '',
             [VOL_DET_SPECIES]: '',
             [VOL_DET_SEX]: '',
-            [VOL_DET_CASTE]: ''
+            [VOL_DET_CASTE]: '',
+            [GEOPRIVACY]: '',
         },
         // A list of fields that should be flagged if empty
         nonEmptyFields: [

@@ -78,9 +78,13 @@ export default class EmailsSubtaskHandler extends BaseSubtaskHandler {
             fieldNames.plantSpecies,
             fieldNames.plantTaxonRank
         ]
+        const privacyErrorFlags = [
+            fieldNames.geoprivacy
+        ]
 
         // Categorize user emails into different lists by error type
-        const locationEmails = [], accuracyEmails = [], taxonomyEmails = []
+        const locationEmails = [], accuracyEmails = [], 
+            taxonomyEmails = [], privacyEmails = []
         for (const [ userLogin, errorFlags ] of Object.entries(userErrorMap)) {
             // Skip users with unknown emails
             if (!userEmailMap[userLogin]) continue
@@ -95,20 +99,24 @@ export default class EmailsSubtaskHandler extends BaseSubtaskHandler {
             if (taxonomyErrorFlags.some((field) => errorFlags.includes(field))) {
                 taxonomyEmails.push(userEmailMap[userLogin])
             }
+            if (privacyErrorFlags.some((field) => errorFlags.includes(field))) {
+                privacyEmails.push(userEmailMap[userLogin])
+            }
         }
 
-        return { locationEmails, accuracyEmails, taxonomyEmails }
+        return { locationEmails, accuracyEmails, taxonomyEmails, privacyEmails }
     }
 
     /*
      * #writeEmailsFile()
      * Writes user emails divided into error categories to a CSV file at the given file path
      */
-    #writeEmailsFile(filePath, locationEmails, accuracyEmails, taxonomyEmails) {
+    #writeEmailsFile(filePath, locationEmails, accuracyEmails, taxonomyEmails, privacyEmails) {
         const emailsHeader = [
             'locationEmails',
             'accuracyEmails',
-            'taxonomyEmails'
+            'taxonomyEmails',
+            'privacyEmails'
         ]
 
         // Convert email lists into object rows
@@ -117,7 +125,8 @@ export default class EmailsSubtaskHandler extends BaseSubtaskHandler {
             const row = {
                 'locationEmails': locationEmails[i] ?? '',
                 'accuracyEmails': accuracyEmails[i] ?? '',
-                'taxonomyEmails': taxonomyEmails[i] ?? ''
+                'taxonomyEmails': taxonomyEmails[i] ?? '',
+                'privacyEmails': privacyEmails[i] ?? ''
             }
             emailRows.push(row)
         }
@@ -187,10 +196,12 @@ export default class EmailsSubtaskHandler extends BaseSubtaskHandler {
         const userEmailMap = this.#buildUserEmailMap(users)
 
         // Build three lists of emails categorized by error type (location, accuracy, and taxonomy)
-        const { locationEmails, accuracyEmails, taxonomyEmails } = this.#buildEmailCategories(userErrorMap, userEmailMap)
+        const { locationEmails, accuracyEmails, taxonomyEmails, privacyEmails } 
+            = this.#buildEmailCategories(userErrorMap, userEmailMap)
         
         // Write output file
-        this.#writeEmailsFile(emailsFilePath, locationEmails, accuracyEmails, taxonomyEmails)
+        this.#writeEmailsFile(emailsFilePath, locationEmails, accuracyEmails,
+            taxonomyEmails, privacyEmails)
 
         // Update the task result with the output files
         const outputs = [
