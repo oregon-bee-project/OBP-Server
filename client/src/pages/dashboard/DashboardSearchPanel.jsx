@@ -365,7 +365,7 @@ export default function DashboardSearchPanel({ submitRef, disabled }) {
                     <img src={closeIcon} alt='Clear' />
                 </button>
 
-                <label>To</label>
+                <label>Through</label>
                 <input
                     id='maxDate'
                     type='date'
@@ -431,13 +431,13 @@ export default function DashboardSearchPanel({ submitRef, disabled }) {
                 }
                 { query.start_date &&
                     <button className='filterPill' onClick={(event) => handleClear(event, 'start_date')}>
-                        <p>Date &gt; {query.start_date}</p>
+                        <p>From {query.start_date}</p>
                         <img src={closeIcon} alt='Clear' />
                     </button>
                 }
                 { query.end_date &&
                     <button className='filterPill' onClick={(event) => handleClear(event, 'end_date')}>
-                        <p>Date &lt; {query.end_date}</p>
+                        <p>Through {query.end_date}</p>
                         <img src={closeIcon} alt='Clear' />
                     </button>
                 }
