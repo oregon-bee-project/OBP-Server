@@ -102,7 +102,7 @@ export default function SubtaskCardForm({ type, taskState, pipelineState, setPip
     const descriptions = {
         'occurrences': 'Formats and updates an occurrences file',
         'observations': 'Pulls observations from iNaturalist and merges them into an occurrences file',
-        'overwrite': 'Overwrites existing occurrences with a matching field number from a revisions file',
+        'overwrite': 'Overwrites existing occurrences using revisions with matching field numbers',
         'labels': 'Creates a sheet of labels from an occurrences or pulls file',
         'addresses': 'Compiles a list of mailing addresses from an occurrences or pulls file',
         'emails': 'Compiles a list of emails categorized by error type from a flags file',

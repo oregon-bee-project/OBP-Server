@@ -1,6 +1,6 @@
 import BaseSubtaskHandler from './BaseSubtaskHandler.js'
-import { fieldNames, fileLimits, template } from '../../shared/lib/utils/constants.js'
-import { ObservationService, OccurrenceService, TaskService, } from '../../shared/lib/services/index.js'
+import { fileLimits, template } from '../../shared/lib/utils/constants.js'
+import { OccurrenceService, TaskService, } from '../../shared/lib/services/index.js'
 import FileManager from '../../shared/lib/utils/FileManager.js'
 
 export default class OverwriteSubtaskHandler extends BaseSubtaskHandler {
@@ -60,7 +60,6 @@ export default class OverwriteSubtaskHandler extends BaseSubtaskHandler {
 
         // Fetch the task and subtask
         const task = await TaskService.getTaskById(taskId)
-        const subtask = task.subtasks.find((subtask) => subtask.type === 'overwrite')
 
         // Input file names
         // Note -- we assume that a input can *only* come from an upload, not from
@@ -88,7 +87,7 @@ export default class OverwriteSubtaskHandler extends BaseSubtaskHandler {
         const fieldNumbers = revisions.map(revision => revision.fieldNumber)
 
         // Retrieve all occurrences with a matching fieldNumber
-        const result = await OccurrenceService.updateOccurrences(
+        await OccurrenceService.updateOccurrences(
             { fieldNumber: { $in: fieldNumbers  } },
             { scratch: true }
         )
