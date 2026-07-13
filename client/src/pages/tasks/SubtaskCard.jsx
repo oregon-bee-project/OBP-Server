@@ -69,6 +69,10 @@ const SubtaskCardContainer = styled.div`
     .mismatchesFileTip {
         color: var(--mismatches-file-color);
     }
+
+    .revisionsFileTip {
+        color: var(--revisions-file-color);
+    }
 `
 
 function capitalize(text) {

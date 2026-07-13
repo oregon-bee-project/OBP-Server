@@ -1,7 +1,6 @@
 import BaseSubtaskHandler from './BaseSubtaskHandler.js'
-import { determinations, fieldNames, fileLimits, ofvs } from '../../shared/lib/utils/constants.js'
-import { getOFV } from '../../shared/lib/utils/utilities.js'
-import { ApiService, DeterminationsService, ElevationService, ObservationService, ObservationViewService, OccurrenceService, PlacesService, TaskService, PlantTaxaService } from '../../shared/lib/services/index.js'
+import { fieldNames, fileLimits } from '../../shared/lib/utils/constants.js'
+import { ObservationService, OccurrenceService, TaskService, } from '../../shared/lib/services/index.js'
 import FileManager from '../../shared/lib/utils/FileManager.js'
 
 export default class OverwriteSubtaskHandler extends BaseSubtaskHandler {
@@ -92,14 +91,12 @@ export default class OverwriteSubtaskHandler extends BaseSubtaskHandler {
         const mismatchesFilePath = './shared/data/overwrite/' + mismatchesFileName
 
         await TaskService.logTaskStep(taskId, 'Formatting and uploading provided dataset')
-        await TaskService.logTaskStep(taskId, 'Done')
-        return
 
         // Delete old scratch space occurrences (from previous tasks)
         await OccurrenceService.deleteOccurrences({ scratch: true })
 
-        // Move all occurrences into scratch space
-        await OccurrenceService.updateOccurrences(subtask.params?.filter ?? {}, { scratch: true })
+        // Move *all* occurrences into scratch space
+        await OccurrenceService.updateOccurrences({}, { scratch: true })
 
         // This is where the fun begins!
         await TaskService.logTaskStep(taskId, 'This is where the fun begins!')

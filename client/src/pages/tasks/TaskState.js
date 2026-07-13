@@ -35,7 +35,7 @@ export default class TaskState {
                 outputs: [ 'addresses' ]
             },
             'overwrite': {
-                inputs: [ 'occurrences' ],
+                inputs: [ 'revisions' ],
                 outputs: [ 'occurrences', 'mismatches' ]
             }
         }
