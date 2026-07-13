@@ -1,5 +1,5 @@
 import BaseSubtaskHandler from './BaseSubtaskHandler.js'
-import { fieldNames, fileLimits } from '../../shared/lib/utils/constants.js'
+import { fieldNames, fileLimits, template } from '../../shared/lib/utils/constants.js'
 import { ObservationService, OccurrenceService, TaskService, } from '../../shared/lib/services/index.js'
 import FileManager from '../../shared/lib/utils/FileManager.js'
 
@@ -11,60 +11,43 @@ export default class OverwriteSubtaskHandler extends BaseSubtaskHandler {
     /* Private Helper Methods */
 
     /*
-     * #createUpdateProgressFn()
-     * Returns a function that updates a given task's current step progress percentage
+     * #cleanRevision()
+     * Removes all fields from an object which aren't in the occurrence template
      */
-    #createUpdateProgressFn(taskId) {
-        return async (percentage) => {
-            return await TaskService.updateProgressPercentageById(taskId, percentage)
-        }
+    #cleanRevisions(rawRevisions) {
+        return rawRevisions.map(revision => (
+            Object.fromEntries(
+                Object.entries(revision).filter(([ key ]) => key in template)
+            )
+        ))
     }
 
     /*
-     * #updateOccurrencesFromObservations()
-     * Updates existing occurrences using matching observations from the database
+     * #overwriteOccurrences()
+     * Overwrites fields in each occurrence with that of the corresponding revision
+     *   and retuns fieldNumbers of revisions which matched with an occurrence
      */
-    async #updateOccurrencesFromObservations(elevations, updateProgress, overwriteValidLocations = false) {
-
-        // Query occurrences page-by-page to avoid memory constraints
-        let pageNumber = 1
-        let occurrenceIndex = 0
-        const occurrencesFilter = {
-            scratch: true,
-            [fieldNames.iNaturalistUrl]: { $exists: true, $nin: [ null, '' ] }
-        }
-        const observationQueryOptions = {
-            projection: {
-                uuid: 1,
-                positional_accuracy: 1,
-                geojson: 1,
-                taxon: 1,
-                uri: 1,
-                place_guess: 1
+    async #overwriteOccurrences(revisions, occurrences) {
+        const matches = []
+        for (const occurrence of occurrences) {
+            const revision = revisions.find(r => r.fieldNumber === occurrence.fieldNumber)
+            if (!revision) {
+                continue
             }
+            matches.push(revision.fieldNumber)
+            Object.assign(occurrence, revision)
+            await OccurrenceService.updateOccurrenceById(occurrence._id, occurrence)
         }
-        let occurrencesResults = await OccurrenceService.getOccurrencesPage({ page: pageNumber, filter: occurrencesFilter })
-        while (pageNumber <= occurrencesResults.pagination.totalPages) {
-            const urls = occurrencesResults.data.map((occurrence) => occurrence[fieldNames.iNaturalistUrl])
-            const matchingObservations = await ObservationService.getObservations({ 'uri': { $in: urls } }, observationQueryOptions)
-            const urlMap = {}
-            matchingObservations.forEach((observation) => urlMap[observation.uri] = observation)
+        return matches
+    }
 
-            for (const occurrence of occurrencesResults.data) {
-                const matchingObservation = urlMap[occurrence[fieldNames.iNaturalistUrl]]
-                if (matchingObservation) {
-                    // Update the occurrence data from the matching observation
-                    await OccurrenceService.updateOccurrenceFromObservation(occurrence, matchingObservation, elevations, { overwriteValidLocations })
-                }
-
-                await updateProgress(100 * (++occurrenceIndex) / occurrencesResults.pagination.totalDocuments)
-            }
-
-            // Query the next page
-            occurrencesResults = await OccurrenceService.getOccurrencesPage({ page: ++pageNumber, filter: occurrencesFilter })
-        }
-
-        await updateProgress(100)
+    /*
+     * #writeMismatchesFile()
+     * Writes mismatched revisions to a CSV file at the given file path
+     */
+    #writeMismatchesFile(filePath, mismatches, rawRevision) {
+        const header = rawRevision ? Object.keys(rawRevision) : ['fieldNumber']
+        return FileManager.writeCSV(filePath, mismatches, header)
     }
 
     /* Main Handler Method */
@@ -88,18 +71,34 @@ export default class OverwriteSubtaskHandler extends BaseSubtaskHandler {
         const occurrencesFileName = `occurrences_${task.tag}.csv`
         const occurrencesFilePath = './shared/data/occurrences/' + occurrencesFileName
         const mismatchesFileName = `mismatches_${task.tag}.csv`
-        const mismatchesFilePath = './shared/data/overwrite/' + mismatchesFileName
+        const mismatchesFilePath = './shared/data/mismatches/' + mismatchesFileName
 
         await TaskService.logTaskStep(taskId, 'Formatting and uploading provided dataset')
 
         // Delete old scratch space occurrences (from previous tasks)
         await OccurrenceService.deleteOccurrences({ scratch: true })
 
-        // Move *all* occurrences into scratch space
-        await OccurrenceService.updateOccurrences({}, { scratch: true })
+        // Read revisions input file as an Object
+        const rawRevisions = FileManager.readCSV(inputFilePath)
 
-        // This is where the fun begins!
-        await TaskService.logTaskStep(taskId, 'This is where the fun begins!')
+        await TaskService.logTaskStep(taskId, 'Updating occurrence data')
+
+        // Filter off columns which aren't in the occurrence template and extract field numbers
+        const revisions = this.#cleanRevisions(rawRevisions)
+        const fieldNumbers = revisions.map(revision => revision.fieldNumber)
+
+        // Retrieve all occurrences with a matching fieldNumber
+        const result = await OccurrenceService.updateOccurrences(
+            { fieldNumber: { $in: fieldNumbers  } },
+            { scratch: true }
+        )
+        const occurrences = await OccurrenceService.getOccurrences({ scratch: true })
+
+        // Overwrite occurrences with the fields from the revisions
+        const matches = await this.#overwriteOccurrences(revisions, occurrences)
+
+        await TaskService.logTaskStep(taskId, 'Finding mismatches')
+        const mismatches = revisions.filter(r => !(r.fieldNumber in matches))
 
         await TaskService.logTaskStep(taskId, 'Writing output files')
         await TaskService.updateProgressPercentageById(taskId, 0)
@@ -109,28 +108,22 @@ export default class OverwriteSubtaskHandler extends BaseSubtaskHandler {
 
         // Write mismatches file
         await TaskService.updateProgressPercentageById(taskId, 50)
-        // await OccurrenceService.writeOccurrencesFromDatabase(mismatchesFilePath, { scratch: true })
+        this.#writeMismatchesFile(mismatchesFilePath, mismatches, rawRevisions?.at(0))
 
         await TaskService.updateProgressPercentageById(taskId, 100)
 
         // Update the subtask with the output files
         const outputs = [
             { uri: `/api/occurrences/${occurrencesFileName}`, fileName: occurrencesFileName, type: 'occurrences' },
-            { uri: `/api/occurrences/${mismatchesFileName}`, fileName: mismatchesFileName, type: 'occurrences' },
+            { uri: `/api/mismatches/${mismatchesFileName}`, fileName: mismatchesFileName, type: 'mismatches' },
         ]
         await TaskService.updateSubtaskOutputsById(taskId, 'overwrite', outputs)
 
         // Archive excess output files
         FileManager.limitFilesInDirectory('./shared/data/occurrences', fileLimits.maxOccurrences)
-        FileManager.limitFilesInDirectory('./shared/data/occurrences', fileLimits.maxMismatches)
+        FileManager.limitFilesInDirectory('./shared/data/mismatches', fileLimits.maxMismatches)
 
-        if (subtask.excludeOutput) {
-            // Discard scratch space occurrences
-            await OccurrenceService.deleteOccurrences({ scratch: true })
-        } else {
-            // Move all scratch space occurrences back to non-scratch space
-            await OccurrenceService.updateOccurrences({ scratch: true }, { scratch: false })
-        }
-        
+        // Move all scratch space occurrences back to non-scratch space
+        await OccurrenceService.updateOccurrences({ scratch: true }, { scratch: false })
     }
 }
