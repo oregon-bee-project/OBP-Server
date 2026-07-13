@@ -1,7 +1,7 @@
 import amqp from 'amqplib'
 
 import { messageBroker } from '../shared/lib/config/environment.js'
-import { TaskService, ApiService } from '../shared/lib/services/index.js'
+import { TaskService } from '../shared/lib/services/index.js'
 import {
     AddressesSubtaskHandler,
     DeterminationsSubtaskHandler,
@@ -10,6 +10,7 @@ import {
     LabelsSubtaskHandler,
     ObservationsSubtaskHandler,
     OccurrencesSubtaskHandler,
+    OverwriteSubtaskHandler,
     PivotsSubtaskHandler,
     PlantListSubtaskHandler,
     StewardshipReportSubtaskHandler,
@@ -82,6 +83,7 @@ class TaskConsumer {
             const labelsHandler = new LabelsSubtaskHandler()
             const observationsHandler = new ObservationsSubtaskHandler()
             const occurrencesHandler = new OccurrencesSubtaskHandler()
+            const overwriteHandler = new OverwriteSubtaskHandler()
             const pivotsHandler = new PivotsSubtaskHandler()
             const plantListHandler = new PlantListSubtaskHandler()
             const stewardshipReportHandler = new StewardshipReportSubtaskHandler()
@@ -105,6 +107,8 @@ class TaskConsumer {
                     await observationsHandler.handleTask(task._id)
                 } else if (subtask.type === 'occurrences') {
                     await occurrencesHandler.handleTask(task._id)
+                } else if (subtask.type === 'overwrite') {
+                    await overwriteHandler.handleTask(task._id)
                 } else if (subtask.type === 'pivots') {
                     await pivotsHandler.handleTask(task._id)
                 } else if (subtask.type === 'plantList') {
