@@ -37,7 +37,9 @@ archiveRouter.get('/labels', requireAuthentication, createReadDirMiddleware('./s
 
 archiveRouter.get('/observations', requireAuthentication, createReadDirMiddleware('./shared/data/observations', '/api/observations/'))
 
-archiveRouter.get('/occurrences', requireAuthentication, createReadDirMiddleware('./shared/data/occurrences', '/api/occurrences/'))
+archiveRouter.get('/mismatches', requireAuthentication, createReadDirMiddleware('./shared/data/mismatches', '/api/mismatches/'))
+
+archiveRouter.get('/mismatches', requireAuthentication, createReadDirMiddleware('./shared/data/mismatches', '/api/mismatches/'))
 
 archiveRouter.get('/pivots', requireAuthentication, createReadDirMiddleware('./shared/data/pivots', '/api/pivots/'))
 

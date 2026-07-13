@@ -97,6 +97,7 @@ export default function ArchiveBrowser() {
         { name: 'Labels', endpoint: 'labels' },
         { name: 'Observations', endpoint: 'observations' },
         { name: 'Occurrences', endpoint: 'occurrences' },
+        { name: 'Mismatches', endpoint: 'mismatches' },
         { name: 'Pivots', endpoint: 'pivots' },
         { name: 'Pulls', endpoint: 'pulls' },
         { name: 'Reports', endpoint: 'reports' },
