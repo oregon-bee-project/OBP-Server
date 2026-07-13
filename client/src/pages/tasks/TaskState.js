@@ -6,7 +6,9 @@ export default class TaskState {
         this.pivots = !!taskState?.pivots
         this.labels = !!taskState?.labels
         this.addresses = !!taskState?.addresses
-        this.subtasks = [ 'occurrences', 'observations', 'emails', 'pivots', 'labels', 'addresses' ]
+        this.overwrite = !!taskState?.overwrite
+        this.subtasks = [ 'occurrences', 'observations', 'emails',
+            'pivots', 'labels', 'addresses', 'overwrite' ]
         this.subtaskIO = {
             'occurrences': {
                 inputs: [ 'occurrences' ],
@@ -31,6 +33,10 @@ export default class TaskState {
             'addresses': {
                 inputs: [ 'occurrences', 'pulls' ],
                 outputs: [ 'addresses' ]
+            },
+            'overwrite': {
+                inputs: [ 'revisions' ],
+                outputs: [ 'occurrences', 'mismatches' ]
             }
         }
         this.id = !!taskState?.id

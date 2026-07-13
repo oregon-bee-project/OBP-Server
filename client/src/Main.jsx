@@ -58,6 +58,8 @@ const globalStyles = css`
         --addresses-file-color: #930082;
         --emails-file-color: #07b2b2;
         --pivots-file-color: #9794f7;
+        --revisions-file-color: #006e5e;
+        --mismatches-file-color: #8f3400ff;
     }
 
     body {

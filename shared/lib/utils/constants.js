@@ -124,7 +124,8 @@ const constants = {
         maxPulls: 25,
         maxReports: 25,
         maxTaxonomy: 2,
-        maxUploads: 25
+        maxUploads: 25,
+        maxMismatches: 25
     },
     auth: {
         saltLength: 10
@@ -142,7 +143,8 @@ const constants = {
             { type: 'plantList', authRequired: true },
             { type: 'stewardshipReport', authRequired: true },
             { type: 'syncOccurrences', authRequired: true },
-            { type: 'upload', authRequired: true }
+            { type: 'upload', authRequired: true },
+            { type: 'overwrite', authRequired: true }
         ]
     },
     occurrences: {

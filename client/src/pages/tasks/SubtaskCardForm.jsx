@@ -102,6 +102,7 @@ export default function SubtaskCardForm({ type, taskState, pipelineState, setPip
     const descriptions = {
         'occurrences': 'Formats and updates an occurrences file',
         'observations': 'Pulls observations from iNaturalist and merges them into an occurrences file',
+        'overwrite': 'Overwrites existing occurrences using revisions with matching field numbers',
         'labels': 'Creates a sheet of labels from an occurrences or pulls file',
         'addresses': 'Compiles a list of mailing addresses from an occurrences or pulls file',
         'emails': 'Compiles a list of emails categorized by error type from a flags file',
@@ -179,7 +180,8 @@ export default function SubtaskCardForm({ type, taskState, pipelineState, setPip
                             >Output occurrences with blank dateLabelPrint field</label>
                         </div>
                     }
-                    { taskState.subtaskIO[type].outputs.includes('occurrences') &&
+                    { type !== 'overwrite' 
+                      && taskState.subtaskIO[type].outputs.includes('occurrences') &&
                         <div className='subtaskSetting'>
                             <input
                                 id={`${type}ExcludeOutput`}
