@@ -45,8 +45,8 @@ export default class OverwriteSubtaskHandler extends BaseSubtaskHandler {
      * #writeMismatchesFile()
      * Writes mismatched revisions to a CSV file at the given file path
      */
-    #writeMismatchesFile(filePath, mismatches, rawRevision) {
-        const header = rawRevision ? Object.keys(rawRevision) : ['fieldNumber']
+    #writeMismatchesFile(filePath, mismatches, sampleRevision) {
+        const header = sampleRevision ? Object.keys(sampleRevision) : ['fieldNumber']
         return FileManager.writeCSV(filePath, mismatches, header)
     }
 
@@ -98,7 +98,7 @@ export default class OverwriteSubtaskHandler extends BaseSubtaskHandler {
         const matches = await this.#overwriteOccurrences(revisions, occurrences)
 
         await TaskService.logTaskStep(taskId, 'Finding mismatches')
-        const mismatches = revisions.filter(r => !(r.fieldNumber in matches))
+        const mismatches = revisions.filter(r => !(matches.includes(r.fieldNumber)))
 
         await TaskService.logTaskStep(taskId, 'Writing output files')
         await TaskService.updateProgressPercentageById(taskId, 0)
@@ -108,7 +108,7 @@ export default class OverwriteSubtaskHandler extends BaseSubtaskHandler {
 
         // Write mismatches file
         await TaskService.updateProgressPercentageById(taskId, 50)
-        this.#writeMismatchesFile(mismatchesFilePath, mismatches, rawRevisions?.at(0))
+        this.#writeMismatchesFile(mismatchesFilePath, mismatches, revisions?.at(0))
 
         await TaskService.updateProgressPercentageById(taskId, 100)
 
