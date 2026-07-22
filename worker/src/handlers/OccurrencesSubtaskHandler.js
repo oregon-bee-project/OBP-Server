@@ -258,28 +258,30 @@ export default class OccurrencesSubtaskHandler extends BaseSubtaskHandler {
         const observationIds = distinctUrls
             .map((url) => url.split('/').pop())
             .filter((id) => id && !isNaN(id))
-        // Fetch the observations corresponding to the uploaded occurrences and insert them into the observations database table
-        let matchingObservations = await ApiService.fetchObservationsByIds(observationIds, this.#createUpdateProgressFn(taskId))
-        // Set a custom field indicating that this observation has a matching occurrence
-        matchingObservations = matchingObservations.map((obs) => ({ ...obs, matched: true }))
 
-        // Insert observations into the database; delete old observations first
+        // Fetch the observations corresponding to the uploaded occurrences and insert them into the
+        // observations database table. Stream chunk-by-chunk so the full set is never held in memory
+        // at once, which could exhaust the worker on large inputs (issue #17).
         await ObservationService.deleteObservations()
-        if (matchingObservations.length > 0) {
-            await ObservationService.createObservations(matchingObservations)
+        for await (const chunk of ApiService.fetchObservationsByIdsChunks(observationIds, this.#createUpdateProgressFn(taskId))) {
+            // Set a custom field indicating that these observations have a matching occurrence
+            const matchingObservations = chunk.map((obs) => ({ ...obs, matched: true }))
+            if (matchingObservations.length > 0) {
+                await ObservationService.createObservations(matchingObservations)
+            }
         }
 
-        const observations = await ObservationService.getObservations()
-
-        // Update places.json and taxa.json from observations table
+        // Update places.json and taxa.json from the observations table. The distinct place and taxon
+        // IDs are computed in the database so full observation documents never enter memory.
         await TaskService.logTaskStep(taskId, 'Updating place data')
 
-        // Everything goes as expected here, nothing new. Followed by a crash.
-        await PlacesService.updatePlacesFromObservations(observations, this.#createUpdateProgressFn(taskId))
+        const placeIds = await ObservationService.getDistinctPlaceIds()
+        await PlacesService.updatePlacesFromIds(placeIds, this.#createUpdateProgressFn(taskId))
 
         await TaskService.logTaskStep(taskId, 'Updating taxonomy data')
 
-        await PlantTaxaService.updateTaxaFromObservations(observations, this.#createUpdateProgressFn(taskId))
+        const taxonIds = await ObservationService.getDistinctTaxonIds()
+        await PlantTaxaService.updateTaxaFromIds(taxonIds, this.#createUpdateProgressFn(taskId))
 
         // Query all distinct coordinates from the occurrences database table
         let coordinates = await OccurrenceService.getDistinctCoordinates({ scratch: true })

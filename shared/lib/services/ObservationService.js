@@ -91,6 +91,14 @@ class ObservationService {
         return await this.repository.distinctCoordinates()
     }
 
+    async getDistinctPlaceIds(filter = {}) {
+        return await this.repository.distinctPlaceIds(filter)
+    }
+
+    async getDistinctTaxonIds(filter = {}) {
+        return await this.repository.distinctTaxonIds(filter)
+    }
+
     async getUnmatchedObservations() {
         return await this.repository.findUnmatched()
     }
