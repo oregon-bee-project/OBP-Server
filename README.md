@@ -10,6 +10,15 @@ Orchestrated with Docker Compose ([`docker-compose.yml`](docker-compose.yml); de
 3. Build the client so nginx can serve it: `cd client && npm run build`, then open http://localhost/.
 4. Log in as an Administrator with the `ADMIN_USERNAME` / `ADMIN_PASSWORD` from your `.env` (seeded on startup).
 
+### Tests and type checking
+Run `npm install` at the repo root, then:
+- `npm test` (or `npm run test:watch`) — [Vitest](https://vitest.dev) tests, colocated with the code as `*.test.ts`. They run on your machine, not in Docker, and never touch a real database or `.env` (see [`test/setupEnv.ts`](test/setupEnv.ts)).
+- `npm run typecheck` — type-checks with `tsc`. The codebase is migrating to TypeScript incrementally; `.js` and `.ts` files coexist (see [`tsconfig.base.json`](tsconfig.base.json)).
+
+Two structural notes:
+- [`shared/lib`](shared/lib) has no `package.json` of its own; in Docker its imports resolve against each container's `node_modules`. So a dependency used by `shared/lib` must be declared in **three** places: `server/package.json`, `worker/package.json`, and the root [`package.json`](package.json) (which makes it resolvable for host-side tests).
+- `server/shared` and `worker/shared` are committed symlinks to [`shared/`](shared), mirroring the layout Docker Compose assembles with bind mounts, so that `../shared/lib/...` imports also resolve outside Docker. They're excluded from image builds via each package's `.dockerignore`.
+
 ### First startup
 Everything under `shared/data/` is gitignored (see [`.gitignore`](.gitignore)), so a fresh clone has to recreate it. An Administrator login at melittologist.org can supply populated copies of the CSVs; empty files are enough to boot.
 
