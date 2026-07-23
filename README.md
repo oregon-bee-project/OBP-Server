@@ -15,7 +15,7 @@ Everything under `shared/data/` is gitignored (see [`.gitignore`](.gitignore)), 
 
 1. Create the directories the subtasks write their output into:
    ```
-   cd shared/data && mkdir -p addresses backups duplicates elevation emails flags labels observations occurrences pivots pulls reports taxonomy uploads
+   cd shared/data && mkdir -p addresses backups duplicates elevation emails flags labels mismatches observations occurrences pivots pulls reports taxonomy uploads
    ```
 2. Create the seed and lookup files:
    ```
