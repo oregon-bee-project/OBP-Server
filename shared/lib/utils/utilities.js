@@ -144,14 +144,18 @@ function parseQueryParameters(query, adminId) {
     }
 
     // Sorting parameters
+    const sortDirection = query.sort_dir === 'desc' ? -1 : 1
     if (query.sort_by === 'fieldNumber') {
-        const direction = query.sort_dir === 'desc' ? -1 : 1
-        params.sortConfig = [ { field: 'composite_sort', direction } ]
+        params.sortConfig = [ { field: 'composite_sort', direction: sortDirection } ]
     } else if (query.sort_by === 'date') {
-        const direction = query.sort_dir === 'desc' ? -1 : 1
         // Sort by date, then default
         params.sortConfig = [
-            { field: 'date', direction },
+            { field: 'date', direction: sortDirection },
+            { field: 'composite_sort', direction: 1 }
+        ]
+    } else if (query.sort_by === 'dateLabelPrint') {
+        params.sortConfig = [
+            { field: 'dateLabelPrint', direction: sortDirection },
             { field: 'composite_sort', direction: 1 }
         ]
     }
