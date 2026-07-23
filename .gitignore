@@ -111,6 +111,9 @@ web_modules/
 .env.production.local
 .env.local
 
+# Local docker-compose override (developer-specific, e.g. port remaps)
+docker-compose.local.yml
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache
