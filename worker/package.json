@@ -4,8 +4,8 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon --inspect=0.0.0.0:9229 -L --watch src --watch shared/lib src/index.js"
+    "start": "tsx src/index.js",
+    "dev": "tsx watch --clear-screen=false --inspect=0.0.0.0:9229 src/index.js"
   },
   "keywords": [],
   "author": "",
@@ -24,9 +24,7 @@
     "googleapis": "^171.4.0",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.21.0",
-    "pdf-lib": "^1.17.1"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.11"
+    "pdf-lib": "^1.17.1",
+    "tsx": "^4.23.1"
   }
 }
