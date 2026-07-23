@@ -4,8 +4,8 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon -L --watch src --watch shared/lib src/index.js"
+    "start": "tsx src/index.js",
+    "dev": "tsx watch --clear-screen=false src/index.js"
   },
   "keywords": [],
   "author": "Myles Scholz",
@@ -27,9 +27,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.21.0",
     "morgan": "^1.10.1",
-    "multer": "^2.0.2"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.11"
+    "multer": "^2.0.2",
+    "tsx": "^4.23.1"
   }
 }
