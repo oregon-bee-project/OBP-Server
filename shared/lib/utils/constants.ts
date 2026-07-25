@@ -601,7 +601,9 @@ const constants = {
             'Franklin , US, WA': 'Franklin'
         }
     }
-}
+// `as const` makes every value a precise literal type and readonly, so
+// TypeScript can catch typos like fieldNames.feildNumber at compile time.
+} as const
 
 export const { fileLimits } = constants
 export const { auth } = constants

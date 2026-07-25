@@ -4,11 +4,37 @@ import { fieldNames, subtasks as subtasksConstant } from './constants.js'
 import { tokens } from '../config/environment.js'
 import { InvalidArgumentError, ValidationError } from './errors.js'
 
+// API query parameters as Express provides them: every value a string, or
+// absent. (Query values can technically also be arrays; this code has always
+// treated them as strings.)
+type QueryParameters = Record<string, string | undefined>
+
+interface SortField {
+    field: string
+    direction: 1 | -1
+    type?: string
+}
+
+export interface ParsedQueryParameters {
+    page: number
+    pageSize: number
+    filter: { date?: { $gte?: Date; $lte?: Date } } & Record<string, unknown>
+    projection: Record<string, 0 | 1>
+    sortConfig: SortField[]
+    error?: { status: number; message: string }
+}
+
+export interface EncryptedObject {
+    iv: string
+    authTag: string
+    data: string
+}
+
 /*
  * includesIllegalSuffix()
  * A boolean function that returns whether a given string contains a street suffix (Road, Rd, Street, St, etc.)
  */
-function includesIllegalSuffix(string) {
+function includesIllegalSuffix(string: unknown): boolean {
     if (!string || typeof string !== 'string') { return false }
     // A list of RegExps to detect street suffixes
     const streetSuffixRegexes = [
@@ -29,13 +55,13 @@ function includesIllegalSuffix(string) {
  * getDayOfYear()
  * Calculates the day of the year (1 - 366) of a given Date object
  */
-function getDayOfYear(date) {
-    if (!(date instanceof Date) || isNaN(date)) {
+function getDayOfYear(date: Date): number | undefined {
+    if (!(date instanceof Date) || isNaN(date.getTime())) {
         return
     }
 
     const startDate = new Date(date.getFullYear(), 0, 0)
-    const dateDifference = date - startDate
+    const dateDifference = date.getTime() - startDate.getTime()
     const dayMilliseconds = 1000 * 60 * 60 * 24
     return Math.floor(dateDifference / dayMilliseconds)
 }
@@ -44,7 +70,7 @@ function getDayOfYear(date) {
  * delay()
  * Returns a Promise that resolves after a given number of milliseconds
  */
-function delay(mSec) {
+function delay(mSec: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, mSec))
 }
 
@@ -52,7 +78,10 @@ function delay(mSec) {
  * getOFV()
  * Looks up the value of an iNaturalist observation field by name
  */
-function getOFV(ofvs, fieldName) {
+function getOFV(
+    ofvs: { name: string; value?: string | number | null }[] | undefined,
+    fieldName: string
+): string | number {
     const ofv = ofvs?.find((field) => field.name === fieldName)
     return ofv?.value ?? ''
 }
@@ -61,8 +90,8 @@ function getOFV(ofvs, fieldName) {
  * parseQueryParameters()
  * Parses API query parameters into a valid database query
  */
-function parseQueryParameters(query, adminId) {
-    const params = {
+function parseQueryParameters(query: QueryParameters, adminId?: string): ParsedQueryParameters {
+    const params: ParsedQueryParameters = {
         page: 1,
         pageSize: 50,
         filter: {},
@@ -92,12 +121,12 @@ function parseQueryParameters(query, adminId) {
     }
 
     // Pagination parameters
-    const parsedPage = parseInt(query.page)
+    const parsedPage = parseInt(query.page ?? '')
     if (query.page && !isNaN(parsedPage)) {
         params.page = parsedPage
     }
 
-    const parsedPerPage = parseInt(query.per_page)
+    const parsedPerPage = parseInt(query.per_page ?? '')
     if (query.per_page && !isNaN(parsedPerPage)) {
         params.pageSize = Math.min(parsedPerPage, 5000)     // Limit page size to 5000
     }
@@ -113,32 +142,31 @@ function parseQueryParameters(query, adminId) {
         return params
     }
     if (startDate.toString() !== 'Invalid Date') {
-        if (!params.filter.date) params.filter.date = {}
-        
         // Set time to noon UTC to avoid location-based date variance
         startDate.setHours(12, 0, 0, 0)
-        params.filter.date.$gte = startDate
+        params.filter.date = { ...params.filter.date, $gte: startDate }
     }
     if (endDate.toString() !== 'Invalid Date') {
-        if (!params.filter.date) params.filter.date = {}
-
         // Set time to noon UTC to avoid location-based date variance
         endDate.setHours(12, 0, 0, 0)
-        params.filter.date.$lte = endDate
+        params.filter.date = { ...params.filter.date, $lte: endDate }
     }
 
     // Parse field names directly included in the query object
     const queryFields = Object.values(fieldNames).filter((fieldName) => !!query[fieldName] || query[fieldName] === '')
     for (const queryField of queryFields) {
-        if (query[queryField] === '(empty)') {
+        const value = query[queryField]
+        if (value === undefined) continue   // can't happen (filtered above); narrows the type
+
+        if (value === '(empty)') {
             // The query value '(empty)' is reserved for empty value queries
             params.filter[queryField] = { $in: [ null, '' ] }
-        } else if (query[queryField] === '(non-empty)') {
+        } else if (value === '(non-empty)') {
             // The query value '(non-empty)' is reserved for non-empty value queries
             params.filter[queryField] = { $exists: true, $nin: [ null, '' ] }
         } else {
             // Comma-separated multi-value queries (case insensitive)
-            const regexes = query[queryField].split(',').map((value) => new RegExp(`^${value}$`, 'i'))
+            const regexes = value.split(',').map((value) => new RegExp(`^${value}$`, 'i'))
             params.filter[queryField] = { $in: regexes }
         }
     }
@@ -165,7 +193,9 @@ function parseQueryParameters(query, adminId) {
  * parseSubtasks()
  * Parses subtasks from a given JSON string, throwing errors if any fields are invalid
  */
-function parseSubtasks(subtasksJSON, adminId) {
+// Subtasks arrive as client-supplied JSON, so JSON.parse can only give `any`;
+// a validated subtask type can come once task handling is converted.
+function parseSubtasks(subtasksJSON: string | undefined, adminId?: string): any[] {
     if (!subtasksJSON) { throw new InvalidArgumentError('subtasks must exist') }
     
     try {
@@ -211,7 +241,9 @@ function parseSubtasks(subtasksJSON, adminId) {
 
         return subtasks
     } catch (error) {
-        if (error.message?.search('JSON.parse') !== -1) {   // Catch JSON parsing errors
+        // Known bug (#45): modern SyntaxError messages don't contain
+        // 'JSON.parse', so malformed JSON escapes as a raw SyntaxError.
+        if (error instanceof Error && error.message?.search('JSON.parse') !== -1) {   // Catch JSON parsing errors
             throw new ValidationError('Invalid JSON in subtasks')
         } else {
             throw error
@@ -222,7 +254,7 @@ function parseSubtasks(subtasksJSON, adminId) {
 const ALGORITHM = 'aes-256-gcm'
 const KEY = Crypto.scryptSync(tokens.secret, tokens.salt, 32)
 
-function encryptObject(object) {
+function encryptObject(object: unknown): EncryptedObject {
     const iv = Crypto.randomBytes(16)
     const cipher = Crypto.createCipheriv(ALGORITHM, KEY, iv)
 
@@ -240,18 +272,19 @@ function encryptObject(object) {
     }
 }
 
-function decryptObject(encryptedObject) {
+function decryptObject(encryptedObject: Partial<EncryptedObject> | null | undefined): any {
     if (!encryptedObject || !encryptedObject.iv || !encryptedObject.authTag || !encryptedObject.data) return
+    const { iv, authTag, data } = encryptedObject
 
     const decipher = Crypto.createDecipheriv(
         ALGORITHM,
         KEY,
-        Buffer.from(encryptedObject.iv, 'hex')
+        Buffer.from(iv, 'hex')
     )
-    decipher.setAuthTag(Buffer.from(encryptedObject.authTag, 'hex'))
+    decipher.setAuthTag(Buffer.from(authTag, 'hex'))
 
     const decrypted = Buffer.concat([
-        decipher.update(Buffer.from(encryptedObject.data, 'hex')),
+        decipher.update(Buffer.from(data, 'hex')),
         decipher.final()
     ])
 

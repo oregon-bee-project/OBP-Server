@@ -77,16 +77,7 @@ describe('parseQueryParameters', () => {
 
     const ADMIN_ID = '64ff0a2b7c1e4d5a6b7c8d9e'
 
-    // tsc infers parseQueryParameters' return type from its initial object
-    // literal in utilities.js, which doesn't include the conditionally-added
-    // `error` field. Until that file is converted to TypeScript, widen the
-    // type here at the test boundary.
-    type ParsedQuery = ReturnType<typeof parseQueryParameters> & {
-        error?: { status: number; message: string }
-        filter: Record<string, unknown>
-    }
-    const parse = (query: Record<string, string>, adminId?: string) =>
-        parseQueryParameters(query, adminId) as ParsedQuery
+    const parse = parseQueryParameters
 
     it('applies default pagination', () => {
         const params = parse({}, ADMIN_ID)
