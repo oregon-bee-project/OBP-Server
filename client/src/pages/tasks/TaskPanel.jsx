@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import styled from '@emotion/styled'
 import axios from 'axios'
@@ -8,6 +8,7 @@ import TaskMenu from './TaskMenu'
 import TaskState from './TaskState'
 import { useFlow } from '../../FlowProvider'
 import { useAuth } from '../../AuthProvider'
+import ConfirmationModal from  '../../components/ConfirmationModal'
 
 const TaskPanelContainer = styled.form`
     display: grid;
@@ -20,6 +21,8 @@ export default function TaskPanel() {
     const [ selectedTaskId, setSelectedTaskId ] = useState()
     const [ postTaskResponse, setPostTaskResponse ] = useState()
     const { query, setQuery } = useFlow()
+    const [ modalEnabled, setModalEnabled ] = useState(false)
+    const pendingSubmitData = useRef(null)
     const { admin } = useAuth()
 
     /* Queries */
@@ -70,7 +73,6 @@ export default function TaskPanel() {
                     const download = {
                         fileName: output.fileName,
                         type: output.type,
-                        subtype: output.subtype,
                         subtask: subtask.type,
                         responseStatus: response.status
                     }
@@ -90,10 +92,10 @@ export default function TaskPanel() {
     /* Handler Functions */
 
     /*
-     * handleSubmit()
-     * Posts a task to the server based on the form data
+     * handleSubmitAttempt()
+     * Checks if a given task is valid and then posts it
      */
-    function handleSubmit(event) {
+    function handleSubmitAttempt(event) {
         event.preventDefault()
 
         // If there are no subtasks, return without posting
@@ -111,6 +113,29 @@ export default function TaskPanel() {
             window.alert('Multiple uploads are not allowed')
             return
         }
+
+        // Warn user if there's an unfiltered selection-based subtask
+        const selectionTaskExists = enabledSubtasks.some(type => {
+            return event.target[`${type}Input`]?.value === 'selection'}
+        )
+        const noFilters = (!query.start_date && !query.end_date 
+            && Object.keys(query.valueQueries).length === 0)
+        if (selectionTaskExists && noFilters) {
+            pendingSubmitData.current = () => handleSubmit(event)
+            setModalEnabled(true)
+            return
+        }
+        handleSubmit(event)
+    }
+
+    /*
+     * handleSubmit()
+     * Posts a task to the server based on the form data
+     */
+    function handleSubmit(event) {
+        event.preventDefault()
+
+        const enabledSubtasks = taskState.getEnabledSubtasks()
 
         setPostTaskResponse(null)
 
@@ -187,7 +212,7 @@ export default function TaskPanel() {
     }
 
     return (
-        <TaskPanelContainer onSubmit={ handleSubmit }>
+        <TaskPanelContainer onSubmit={ handleSubmitAttempt }>
             <TaskMenu
                 taskState={taskState}
                 setTaskState={setTaskState}
@@ -200,6 +225,15 @@ export default function TaskPanel() {
                 taskState={taskState}
                 selectedTaskData={selectedTaskData}
                 downloads={downloads}
+            />
+            <ConfirmationModal
+                modalEnabled={modalEnabled}
+                setModalEnabled={setModalEnabled}
+                callback={() => {
+                    pendingSubmitData?.current()
+                    pendingSubmitData.current = null
+                }}
+                modalText="You haven't filtered the input occurrences. Do you want to continue?"
             />
         </TaskPanelContainer>
     )

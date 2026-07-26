@@ -60,6 +60,7 @@ const VOL_DET_SPECIES = 'speciesVolDet'
 const VOL_DET_SEX = 'sexVolDet'
 const VOL_DET_CASTE = 'casteVolDet'
 const GEOPRIVACY = 'geoprivacy'
+const TAXON_GEOPRIVACY = 'taxon_geoprivacy'
 
 // Observation field names
 const UUID = 'uuid'
@@ -210,7 +211,8 @@ const constants = {
             volDetSpecies: VOL_DET_SPECIES,
             volDetSex: VOL_DET_SEX,
             volDetCaste: VOL_DET_CASTE,
-            geoprivacy: GEOPRIVACY
+            geoprivacy: GEOPRIVACY,
+            taxon_geoprivacy: TAXON_GEOPRIVACY
         },
         // Template object for occurrences; static values are provided as strings, data-dependent values are set to null
         template: {
@@ -275,6 +277,7 @@ const constants = {
             [VOL_DET_SEX]: '',
             [VOL_DET_CASTE]: '',
             [GEOPRIVACY]: '',
+            [TAXON_GEOPRIVACY]: ''
         },
         // A list of fields that should be flagged if empty
         nonEmptyFields: [
@@ -307,6 +310,7 @@ const constants = {
     },
     observations: {
         // Observation field names (CSV)
+        // These are only used for the stewardship report feature
         fieldNames: {
             uuid: UUID,
             id: OBS_ID,
@@ -601,7 +605,9 @@ const constants = {
             'Franklin , US, WA': 'Franklin'
         }
     }
-}
+// `as const` makes every value a precise literal type and readonly, so
+// TypeScript can catch typos like fieldNames.feildNumber at compile time.
+} as const
 
 export const { fileLimits } = constants
 export const { auth } = constants

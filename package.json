@@ -1,0 +1,28 @@
+{
+  "name": "obp-server-dev",
+  "private": true,
+  "type": "module",
+  "description": "Host-side development tooling for OBP-Server (tests, type checking). Not deployed; the deployable packages are server/, worker/, and client/.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p shared && tsc --noEmit -p server && tsc --noEmit -p worker"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "amqplib": "^0.10.9",
+    "bcryptjs": "^3.0.3",
+    "csv-parse": "^6.1.0",
+    "csv-stringify": "^6.6.0",
+    "dotenv": "^17.2.3",
+    "geotiff": "^2.1.4-beta.1",
+    "googleapis": "^171.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongodb": "^6.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
