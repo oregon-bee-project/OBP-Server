@@ -28,12 +28,16 @@ class ObservationService {
             'place_guess',
             'matched'       // Custom field
         ]
-
         const filteredObservation = {}
         for (const field of Object.keys(observation)) {
             if (observationFields.includes(field)) {
                 filteredObservation[field] = observation[field]
             }
+        }
+        // Change 'open' records to null. For our purposes, these two values are
+        //  semantically equivalent, but syntactically different.
+        if (filteredObservation?.taxon_geoprivacy === 'open') {
+            filteredObservation.taxon_geoprivacy = null
         }
 
         return filteredObservation

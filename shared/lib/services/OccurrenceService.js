@@ -28,14 +28,14 @@ class OccurrenceService {
         let errorFields = []
 
         // Flag records which are obscured or private
-        let public = true
+        let isPublic = true
         if (updatedOccurrence[fieldNames.geoprivacy]) {
             errorFields.push(fieldNames.geoprivacy)
-            public = false
+            isPublic = false
         }
         if (updatedOccurrence[fieldNames.taxon_geoprivacy]) {
             errorFields.push(fieldNames.taxon_geoprivacy)
-            public = false
+            isPublic = false
         }
 
         // Flag country and state if they are too long (unabbreviated)
@@ -46,7 +46,7 @@ class OccurrenceService {
         //  known and if it has one of the following:
         //  Has a street/county suffixes; Has illegal characters; Is too long
         if (
-            public &&
+            isPublic &&
             (includesIllegalSuffix(updatedOccurrence[fieldNames.locality]) 
             || /[,"]/.test(updatedOccurrence[fieldNames.locality])
             || updatedOccurrence[fieldNames.locality]?.length > 18)
@@ -412,7 +412,8 @@ class OccurrenceService {
         occurrence[fieldNames.plantTaxonRank] = observation.taxon?.rank || minRank || ''
 
         occurrence[fieldNames.iNaturalistUrl] = observation.uri ?? ''
-        occurrence[fieldNames.geoprivacy] = observation.geoprivacy
+        occurrence[fieldNames.geoprivacy] = observation.geoprivacy ?? ''
+        occurrence[fieldNames.taxon_geoprivacy] = observation.taxon_geoprivacy ?? ''
 
         // Set error flags
         occurrence = this.updateErrorFlags(occurrence)
