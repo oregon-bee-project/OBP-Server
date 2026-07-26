@@ -27,21 +27,29 @@ class OccurrenceService {
         // A list of fields to flag in addition to the non-empty fields
         let errorFields = []
 
-        // Record has an obscured or private geojson
+        // Flag records which are obscured or private
+        let isPublic = true
         if (updatedOccurrence[fieldNames.geoprivacy]) {
             errorFields.push(fieldNames.geoprivacy)
+            isPublic = false
+        }
+        if (updatedOccurrence[fieldNames.taxon_geoprivacy]) {
+            errorFields.push(fieldNames.taxon_geoprivacy)
+            isPublic = false
         }
 
         // Flag country and state if they are too long (unabbreviated)
         if (updatedOccurrence[fieldNames.country]?.length > 3) { errorFields.push(fieldNames.country) }
         if (updatedOccurrence[fieldNames.stateProvince]?.length > 2) { errorFields.push(fieldNames.stateProvince) }
 
-        // Flag locality if it contains street/county suffixes, 
-        //  has illegal characters, or is too long
+        // Flag locality if the observation's precise location is intended to be 
+        //  known and if it has one of the following:
+        //  Has a street/county suffixes; Has illegal characters; Is too long
         if (
-            includesIllegalSuffix(updatedOccurrence[fieldNames.locality]) 
+            isPublic &&
+            (includesIllegalSuffix(updatedOccurrence[fieldNames.locality]) 
             || /[,"]/.test(updatedOccurrence[fieldNames.locality])
-            || updatedOccurrence[fieldNames.locality]?.length > 18
+            || updatedOccurrence[fieldNames.locality]?.length > 18)
         ) {
             errorFields.push(fieldNames.locality)
         }
@@ -404,7 +412,8 @@ class OccurrenceService {
         occurrence[fieldNames.plantTaxonRank] = observation.taxon?.rank || minRank || ''
 
         occurrence[fieldNames.iNaturalistUrl] = observation.uri ?? ''
-        occurrence[fieldNames.geoprivacy] = observation.geoprivacy
+        occurrence[fieldNames.geoprivacy] = observation.geoprivacy ?? ''
+        occurrence[fieldNames.taxon_geoprivacy] = observation.taxon_geoprivacy ?? ''
 
         // Set error flags
         occurrence = this.updateErrorFlags(occurrence)
