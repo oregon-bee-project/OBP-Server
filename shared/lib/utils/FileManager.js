@@ -6,6 +6,39 @@ import { parse as parseSync } from 'csv-parse/sync'
 import { stringify as stringifyAsync } from 'csv-stringify'
 import { stringify as stringifySync } from 'csv-stringify/sync'
 
+const writeOptions = {
+    header: true,
+    // columns: header,
+    bom: true,
+    cast: {
+        date: (value) => (value.toISOString())
+    }
+}
+
+const readOptions = { 
+    columns: true,
+    skip_empty_lines: true,
+    relax_quotes: true,
+    trim: true,
+    bom: true,
+    // Reads in (some) ISO 8601 date strings as proper Date objects
+    cast: (value, context) => {
+        if (context.header) return value
+        return (isISODate(value)) ? new Date(value) : value
+    }
+}
+
+// Adapted from https://stackoverflow.com/a/52869830 and tested with regexr.com
+// Retrieved 2026-07-25, License - CC BY-SA 4.0
+function isISODate(date) {
+    if (!/\d{4}-\d{2}-\d{2}T(?:\d{2}:\d{2}:\d{2})?(?:.\d{3})?(?:Z|(:?-\d{2}:\d{2}))/.test(date)) {
+        return false
+    }
+  const d = new Date(date)
+  return !isNaN(d.getTime())
+}
+
+
 class FileManager {
     constructor() {}
 
@@ -29,7 +62,7 @@ class FileManager {
      */
     writeCSV(filePath, data, header) {
         try {
-            const csv = stringifySync(data, { header: true, columns: header, bom: true })
+            const csv = stringifySync(data, writeOptions)
             fs.writeFileSync(filePath, csv)
             return true
         } catch (error) {
@@ -50,7 +83,7 @@ class FileManager {
         try {
             // Create an output stringifier
             const outputFileStream = fs.createWriteStream(filePath, { encoding: 'utf-8' })
-            const stringifier = stringifyAsync({ header: true, columns: header, bom: true })
+            const stringifier = stringifyAsync(writeOptions)
             stringifier.pipe(outputFileStream)
         
             // Create a function that guarantees write completion before continuing
@@ -122,7 +155,7 @@ class FileManager {
 
         try {
             const data = fs.readFileSync(filePath)
-            return parseSync(data, { columns: true, skip_empty_lines: true, relax_quotes: true, trim: true, bom: true })
+            return parseSync(data, readOptions)
         } catch (error) {
             console.error(`Error while attempting to read and parse '${filePath}':`, error)
         }
@@ -159,7 +192,7 @@ class FileManager {
         })
 
         // Create a CSV parser and pipe the file stream into it
-        const parser = parseAsync({ columns: true, skip_empty_lines: true, relax_quotes: true, trim: true, bom: true })
+        const parser = parseAsync(readOptions)
         const csvStream = fileStream.pipe(parser)
 
         // Create a chunk to store rows
