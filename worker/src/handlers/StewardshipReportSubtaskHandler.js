@@ -35,40 +35,51 @@ export default class StewardshipReportSubtaskHandler extends BaseSubtaskHandler 
 
         // Input and output file names
         const uploadFilePath = task.upload?.filePath ?? ''
-        const observationsFileName = `observations_${task.tag}.csv`
-        const observationsFilePath = './shared/data/observations/' + observationsFileName
+        const occurrencesFilePath = './shared/data/workingOccurrences.csv'
+        const plantListFilePath = "./shared/data/plantList.csv"
+        // const observationsFileName = `observations_${task.tag}.csv`
+        // const observationsFilePath = './shared/data/observations/' + observationsFileName
         const stewardshipReportFileName = `observations_${task.tag}-report.pdf`
-        const stewardshipReportFilePath = './shared/data/reports/' + stewardshipReportFileName
+        // const stewardshipReportFilePath = './shared/data/reports/' + stewardshipReportFileName
+        const stewardshipReportFilePath = './shared/data/reports/'
 
-        // Pull iNaturalist observations and write them to a CSV in /shared/data/observations
-        await TaskService.logTaskStep(taskId, 'Querying observations from iNaturalist')
-
-        // Delete old observations (from previous tasks)
-        await ObservationService.deleteObservations()
-        // Fetch observations from the given URL and insert them into the database
-        const observations = await ApiService.fetchUrlPages(subtask.url, this.#createUpdateProgressFn(taskId))
-        await ObservationService.createObservations(observations)
-        // Flatten and write the observations to a CSV in /shared/data/observations
-        await ObservationService.writeObservationsFromDatabase(observationsFilePath)
+        // // Pull iNaturalist observations and write them to a CSV in /shared/data/observations
+        // await TaskService.logTaskStep(taskId, 'Querying observations from iNaturalist')
+        //
+        // // Delete old observations (from previous tasks)
+        // await ObservationService.deleteObservations()
+        // // Fetch observations from the given URL and insert them into the database
+        // // Something about this function hits too many requests -- let's abandon it for now
+        // const observations = await ApiService.fetchUrlPages(subtask.url, this.#createUpdateProgressFn(taskId))
+        // await ObservationService.createObservations(observations)
+        // // Flatten and write the observations to a CSV in /shared/data/observations
+        // await ObservationService.writeObservationsFromDatabase(observationsFilePath)
 
         // Execute the stewardship report R script
         await TaskService.logTaskStep(taskId, 'Creating stewardship report')
         await TaskService.updateProgressPercentageById(taskId, 0)
         
-        const { success, stdout, stderr } = await ScriptService.runRScript('./src/scripts/makeReports.R', [ uploadFilePath ])
+        // Directly feeding the uploadFilePath may not work if it's relative?
+        // For ease of testing, we'll always feed it workingOccurrences.csv
+        //  TODO: Make it instead take a selection / upload, as is typical for other tasks
+        const { success, stdout, stderr } = await ScriptService.runRScript('./src/scripts/dry-run.R', [ plantListFilePath, occurrencesFilePath, uploadFilePath, stewardshipReportFilePath ])
         if (!success) {
+            console.log(stdout, '\n', stderr)
             throw new Error('Script failed')
         }
         
-        // Wait 5 seconds for rendering to finish
-        await delay(5000)
+        // // Wait 5 seconds for rendering to finish
+        // //   this seems bad -- isn't there a way to wait on the rendering process to finish?
+        // await delay(5000)
+
+        console.log(stdout, stderr)
 
         await TaskService.updateProgressPercentageById(taskId, 100)
 
-        // Clean up observations files
-        await TaskService.logTaskStep(taskId, 'Cleaning up files')
-
-        FileManager.clearDirectory('./shared/data/observations')
+        // // Clean up observations files
+        // await TaskService.logTaskStep(taskId, 'Cleaning up files')
+        //
+        // FileManager.clearDirectory('./shared/data/observations')
 
         // Update the task result with the output files
         const outputs = [

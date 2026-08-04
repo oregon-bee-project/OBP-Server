@@ -249,7 +249,7 @@ export default function StewardshipReportForm() {
                     <form onSubmit={ handleSubmit }>
                         <fieldset disabled={formDisabled}>
                             <div>
-                                <label htmlFor='stewardshipReportFileUpload'>Melittoflora Dataset:</label>
+                                <label htmlFor='stewardshipReportFileUpload'>Observations export:</label>
                                 <input
                                     type='file'
                                     accept='.csv'
@@ -258,12 +258,12 @@ export default function StewardshipReportForm() {
                                 />
                             </div>
                             <div>
-                                <label htmlFor='stewardshipReportUrl'>URL:</label>
-                                <input
-                                    type='url'
-                                    id='stewardshipReportUrl'
-                                    required
-                                />
+                                {/* <label htmlFor='stewardshipReportUrl'>iNaturalist project URL:</label> */}
+                                {/* <input */}
+                                {/*     type='url' */}
+                                {/*     id='stewardshipReportUrl' */}
+                                {/*     required */}
+                                {/* /> */}
                             </div>
 
                             <input type='submit' value='Submit' />

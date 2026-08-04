@@ -10,6 +10,7 @@ class ScriptService {
         const command = `${cmd} "${scriptPath}"${args ? ' ' + args.join(' ') : ''}`
 
         try {
+            // TODO: Move these constants into an .env or config file
             const { stdout, stderr } = await this.execPromise(command, {
                 maxBuffer: 1024 * 1024 * 10,    // 10 MB buffer limit
                 timeout: 300000                 // 5 minute timeout
