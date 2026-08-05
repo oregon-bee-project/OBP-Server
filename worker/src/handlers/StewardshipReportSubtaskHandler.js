@@ -33,61 +33,60 @@ export default class StewardshipReportSubtaskHandler extends BaseSubtaskHandler 
         const task = await TaskService.getTaskById(taskId)
         const subtask = task.subtasks.find((subtask) => subtask.type === 'stewardshipReport')
 
-        // Input and output file names
+        // Script input files
         const uploadFilePath = task.upload?.filePath ?? ''
-        const occurrencesFilePath = './shared/data/workingOccurrences.csv'
-        const plantListFilePath = "./shared/data/plantList.csv"
-        // const observationsFileName = `observations_${task.tag}.csv`
-        // const observationsFilePath = './shared/data/observations/' + observationsFileName
-        const stewardshipReportFileName = `observations_${task.tag}-report.pdf`
-        // const stewardshipReportFilePath = './shared/data/reports/' + stewardshipReportFileName
-        const stewardshipReportFilePath = './shared/data/reports/'
+        const occurrencesPath = './shared/data/workingOccurrences.csv'
+        const plantListPath = "./shared/data/plantList.csv"
 
-        // // Pull iNaturalist observations and write them to a CSV in /shared/data/observations
-        // await TaskService.logTaskStep(taskId, 'Querying observations from iNaturalist')
-        //
-        // // Delete old observations (from previous tasks)
-        // await ObservationService.deleteObservations()
-        // // Fetch observations from the given URL and insert them into the database
-        // // Something about this function hits too many requests -- let's abandon it for now
-        // const observations = await ApiService.fetchUrlPages(subtask.url, this.#createUpdateProgressFn(taskId))
-        // await ObservationService.createObservations(observations)
-        // // Flatten and write the observations to a CSV in /shared/data/observations
-        // await ObservationService.writeObservationsFromDatabase(observationsFilePath)
+        const tempDirectory = './shared/data/temp/'
+        const observationsPath = tempDirectory + 'observations.csv'
+
+        // Script output files
+        const defaultReportName = 'report.pdf'
+        const defaultReportPath = tempDirectory + defaultReportName
+        const defaultPlantSummaryName = 'plantDataSummary.csv'
+        const defaultPlantSummaryPath = tempDirectory + defaultPlantSummaryName
+
+        // Subtask output files
+        const outputDirectory = './shared/data/reports/'
+        const reportName = `stewardship_reports_${task.tag}.pdf`
+        const reportPath = outputDirectory + reportName
+        const plantSummaryName = `plant_summary_${task.tag}.csv`
+        const plantSummaryPath = outputDirectory + plantSummaryName
+
+        // Clear out temp directory from previous subtasks
+        FileManager.clearDirectory(tempDirectory)
+
+        // Move uploaded file to dedicated "input directory"
+        FileManager.copyFile(uploadFilePath, observationsPath)
 
         // Execute the stewardship report R script
         await TaskService.logTaskStep(taskId, 'Creating stewardship report')
-        await TaskService.updateProgressPercentageById(taskId, 0)
         
-        // Directly feeding the uploadFilePath may not work if it's relative?
-        // For ease of testing, we'll always feed it workingOccurrences.csv
-        //  TODO: Make it instead take a selection / upload, as is typical for other tasks
-        const { success, stdout, stderr } = await ScriptService.runRScript('./src/scripts/dry-run.R', [ plantListFilePath, occurrencesFilePath, uploadFilePath, stewardshipReportFilePath ])
+        //  TODO: Make this subtask take a selection / upload for occurrences,
+        //      instead of just whataver happens to be in "workingOccurrences"
+        const { success, stdout, stderr } = await ScriptService.runRScript('./src/scripts/stewardshipReports/run.R', [ plantListPath, occurrencesPath, tempDirectory, tempDirectory ])
         if (!success) {
-            console.log(stdout, '\n', stderr)
             throw new Error('Script failed')
         }
-        
-        // // Wait 5 seconds for rendering to finish
-        // //   this seems bad -- isn't there a way to wait on the rendering process to finish?
-        // await delay(5000)
 
-        console.log(stdout, stderr)
+        await TaskService.logTaskStep(taskId, 'Writing output files')
 
-        await TaskService.updateProgressPercentageById(taskId, 100)
+        FileManager.copyFile(defaultReportPath, reportPath)
+        FileManager.copyFile(defaultPlantSummaryPath, plantSummaryPath)
 
-        // // Clean up observations files
-        // await TaskService.logTaskStep(taskId, 'Cleaning up files')
-        //
-        // FileManager.clearDirectory('./shared/data/observations')
 
         // Update the task result with the output files
         const outputs = [
-            { uri: `/api/reports/${stewardshipReportFileName}`, fileName: stewardshipReportFileName, type: 'report', subtype: 'stewardship' }
+            { uri: `/api/reports/${reportName}`, fileName: reportName, type: 'report', subtype: 'stewardship' },
+            { uri: `/api/reports${plantSummaryName}`, fileName: plantSummaryName, type: 'plantSummary' }
         ]
         await TaskService.updateSubtaskOutputsById(taskId, 'stewardshipReport', outputs)
 
         // Archive excess output files
         FileManager.limitFilesInDirectory('./shared/data/reports', fileLimits.maxReports)
+
+        // Clean up temp directory
+        FileManager.clearDirectory(tempDirectory)
     }
 }

@@ -1,0 +1,526 @@
+---
+author: ""
+output: 
+  bookdown::pdf_document2:
+    toc: false
+    fig_caption: yes
+    keep_tex: false
+    keep_md: false
+header-includes:
+  - \usepackage{sectsty} %Change font sizes of section titles
+  - \sectionfont{\fontsize{22}{15}\selectfont} %Change section title font size to 22
+  - \usepackage{xcolor}
+  - \definecolor{osuRed}{RGB}{215, 63, 9} %OSU red colour
+  - \usepackage{setspace}
+  - \usepackage{fancyhdr}
+  - \usepackage{multicol}
+  - \pagestyle{fancy}
+  - \fancyhf{} %Remove section names from header/footer
+  - \renewcommand{\headrulewidth}{0pt}
+  - \usepackage{tcolorbox}
+  - \usepackage{pdfpages}
+  - \usepackage{tikzpagenodes}
+  - \usetikzlibrary{calc}
+  - \usetikzlibrary{matrix}
+  - \pagenumbering{gobble}
+  - \usepackage{booktabs}
+  - \usepackage{longtable}
+  - \usepackage{multirow}
+  - \usepackage{float}
+  - \usepackage{pdflscape}
+  - \usepackage{makecell} %Required for doing line breaks within a table
+  - \usepackage[default,oldstyle,scale=0.85]{opensans} 
+  - \usepackage[T1]{fontenc}
+  
+params:
+  set_title: "NULL"
+geometry: margin=2cm
+title: ""
+---
+
+```{r setup, include=FALSE}
+#OREGON BEE ATLAS PROJECT - ECOREGION REPORT SUMMARY SHEET
+#WRITTEN BY SAM ROBINSON, SPRING 2026
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+theme_set(theme_classic())
+library(dplyr)
+library(tidyr)
+library(ggpubr)
+library(ggrepel)
+library(sf)
+# library(vegan)
+# library(bipartite)
+library(basemaps) #https://jakob.schwalb-willmann.de/basemaps/ #Open source mapping package
+library(stars)
+
+#knitr options
+knitr::opts_chunk$set(
+	eval = TRUE,
+	echo = FALSE,
+	fig.path = "./figs",
+	message = FALSE,
+	warning = FALSE
+)
+
+options(dplyr.summarise.inform=FALSE, warn=-1) #Suppress warnings
+  
+if(any(sapply(params,function(x) x=='NULL'))){
+  stop("Vineyard name and output directory must be specified")
+}
+
+#Load vineyard plant data from iNaturalist records
+
+#Plants from focal project
+iNatPlDat_vy <- filter(iNatPlDat, vineyard==params$set_title)
+
+# #Debugging: param is a reserved word in this context
+# iNatPlDat_vy <- filter(iNatPlDat, vineyard=='liz-shen')
+
+if(length(unique(iNatPlDat_vy$ecoreg))!=1){
+  stop(paste0('Project has ',length(unique(iNatPlDat_vy$ecoreg)),' ecoregions; should be 1'))
+} else {
+  ecoRegName <- unique(iNatPlDat_vy$ecoreg) #Get ecoregion for this iNat project
+}
+
+#Plant species found on project during different years
+inatPlDat_year <- iNatPlDat_vy %>% st_drop_geometry() %>% 
+  select(scientific_name,year) %>% distinct() %>% 
+  mutate(across(everything(),factor)) %>% 
+  count(scientific_name,year,.drop = FALSE) %>% 
+  pivot_wider(names_from=year,values_from = 'n',names_prefix = 'in',
+              values_fill = 0,values_fn = ~.x==1)
+
+#Bee data from focal ecoregion
+beeData_ecoreg <- beeData %>% filter(ecoreg==ecoRegName) %>% 
+  st_drop_geometry() %>% 
+  select(-CollectorName,-Sex,-Method,-ecoreg)
+
+#Get scores for potential new plant genera/species
+
+#Scores for potential new spp/genera
+plantScoresSpp <- getPlGenScores(mat = ecoRegNetworks[[ecoRegName]]$ntwk_all, #Regional network (plant spp - bee spp)
+                               plGen = unique(iNatPlDat_vy$scientific_name[!grepl('spp.',iNatPlDat_vy$scientific_name)]), #Plants species from iNat project
+                               exclude = nonNativeSpp[!grepl('spp.',nonNativeSpp)]) %>% #Non-native species to exclude
+  select(-Chao1,-Chao1Z) %>% 
+  left_join(plantList,by=c('PlantGenus'='Scientific_name')) %>%
+  filter(isNative) %>% 
+  filter(!is.na(Common_name)) %>% #Removes genSpp not found in plant list - mostly errors from the recorded plants in the bee data, I think
+  mutate(newBeeFam=sapply(strsplit(newSpp,split = ', '),function(x){ #Which families are most benefitted?
+    paste0(unique(famGen$lookupFam[famGen$Genus %in% gsub(' .*$','',x)]),collapse=', ')
+    }))
+
+#Predicted bee occurrance based on spp found on the project (bee "alpha diversity")
+suppBeeSpp <- beeData_ecoreg %>% st_drop_geometry() %>% 
+  right_join(inatPlDat_year,by=c('ForagePlant'='scientific_name')) %>%  #Joins in yearly occurrence of each plant genus
+  filter(!is.na(Species)) %>% 
+  select(genSpp,contains('in20')) %>% distinct() %>% #Bee species
+  group_by(genSpp) %>% summarize(across(contains('in20'),~any(.x))) %>% 
+  mutate(Genus=gsub('\\s.*','',genSpp)) %>% left_join(famGen,by='Genus') 
+  
+#Counts of supported bees by family (existing + suggested 5 new plants)
+newBeeSpp <- plantScoresSpp %>% filter(isNative,!isWeedy,!isNoxious) %>% #New bee spp from the sugested plants
+  slice(1:5) %>% #First 5 suggested plants
+  pull(newSpp) %>% lapply(.,function(x) strsplit(x,', ')) %>% unlist() %>% unique()
+
+#Joins together existing and future bees
+suppBeeSpp_new <- bind_rows(select(suppBeeSpp,genSpp,contains('in')),
+                            data.frame(genSpp=newBeeSpp),.id = 'cat') %>%  
+  mutate(cat=ifelse(cat=='1','existing','new'),Genus=gsub('\\s.+$','',genSpp)) %>% 
+  left_join(famGen,by='Genus')
+
+#Regional plant species visitor richness + other traits 
+#includes non-visited plants, non-native plants, does NOT include weedy or noxious
+ecoRegPlSpp <- ecoRegNetworks[[ecoRegName]]$sppList %>% #Visited plants from ecoregion
+  transmute(genSpp=Scientific_name,N=Nbees,EstRich=Nbees_estim,Nrare=Nbees_rare, #Choose fields of interest
+            Common_name,isNative,isWeedy,isNoxious,
+            Lifecycle,Bloom_start,Bloom_end,quality) %>%
+  mutate(across(where(is.factor),as.character)) #Factor to character
+  
+#Join regional info to (grouped) grower plant info
+iNatPlSpp <- iNatPlDat_vy %>% st_drop_geometry() %>% 
+  filter(!grepl('.spp',scientific_name)) %>% #Removes genus only records
+  group_by(scientific_name) %>% summarize(common_name=first(common_name),Nplants=n()) %>% #Nplants = Number of plants observed in iNat project
+  left_join(ecoRegPlSpp,c('scientific_name'='genSpp')) %>% #Join to ecoregion info
+  mutate(Common_name=ifelse(is.na(Common_name),common_name,Common_name)) %>% select(-common_name) %>% #Replaces common name from plant list with iNat name if NA
+  mutate(across(where(is.factor),as.character)) %>% #Factor to character
+  mutate(across(c(N,EstRich,Nrare),~ifelse(is.na(.x),0,.x)),#Fills in unmatched records with zeros (not visited)
+         quality=ifelse(is.na(quality),'poor',quality)) %>% 
+  mutate(quality=case_when(
+    isNoxious | isWeedy ~ 'poor', #Changes any noxious/weedy plants to poor quality
+    quality=='super' & !isNative & !isWeedy ~ 'good', #Changes non-weedy exotics from "super" to "good"
+    .default = quality
+    )) %>% 
+  mutate(quality=factor(quality,levels=c('poor','good','super')))
+
+
+#"Super bee plants" in iNat project - must be high-quality, not weedy, and not have NA values 
+superPl_spp <- iNatPlSpp %>% 
+  filter(quality=='super',!isNoxious,!isWeedy) %>% 
+  arrange(desc(N),desc(Nrare))
+
+#Get range of bees found on other projects from this ecoregion
+beeDivRange <- sapply(iNatNetworks,function(x,y) ifelse(x$ecoregNtwk_summary$ecoRegName!=y,NA,ncol(x$ntwk)),
+       y=ecoRegName)
+beeDivRange <- unique(unname(beeDivRange[!is.na(beeDivRange)])) 
+
+```
+
+\newgeometry{margin=2cm,top=2in}
+
+<!-- Create overlay for beginning of document-->
+
+```{r getLogos}
+provNms <- strsplit(ecoRegNetworks[[ecoRegName]]$ProvStateName,',')[[1]] #Get province/state names
+# provNms <- provNms[provNms!="Oregon"] #Remove Oregon
+provLogoPaths <- list.files(system.file('extdata',package='vineyardReportsOSU',mustWork = TRUE),
+                            pattern=".*BeeAtlas-Logo.png$",full.names = FALSE) #Get paths to logos
+provLogoPaths <- provLogoPaths[grepl(paste0("(",paste0(provNms,collapse = '|'),")"),provLogoPaths)] #Filter paths
+provLogoTeX <- paste0("\\node{\\includegraphics[height=2cm]{../extdata/",provLogoPaths,"}};",collapse=' & ') #LaTex code to render logos as part of a tikzpicture matrix
+
+##Example LaTeX code --->
+    # \matrix[matrix anchor=south west, anchor=base, yshift=0.5cm,xshift=1cm, row sep=0pt, column sep=1cm] at (current page.south west) {
+    #   \node{\includegraphics[height=2cm]{../extdata/OSU_ES-MM_horizontal_2C_O_over_B.png}}; &
+    #   \node{\includegraphics[height=2cm]{../extdata/Oregon-BeeAtlas-Logo.png}}; &
+    #   \node{\includegraphics[height=2cm]{../extdata/Washington-BeeAtlas-Logo.png}}; \\ 
+    # };
+```
+
+<!-- Draws overlay for title page in the following order: -->
+<!-- \fill[osuRed] ... = Red rectangle at the top -->
+<!-- \node = Report header ("Stewardship report" text) -->
+<!-- \node = Text: Stewardship report -->
+<!-- \node = Bee stewards logo -->
+<!-- \matrix = Grid of University and provincial logos at the bottom of the page, assembled in R chunk above -->
+
+\begin{tikzpicture}[remember picture,overlay]
+    \fill[osuRed] (current page.north west) rectangle ([yshift=0cm] current page text area.north  -| current page.east); 
+    \node[anchor=north west,rectangle,,yshift=-0.5cm,xshift=1cm] at (current page.north west){\includegraphics[height=2.5cm]{../extdata/stewardship_report_header.png}};
+    \node[minimum height = 2.3cm,minimum width=8cm,anchor=south west,font=\color{white}\Huge\linespread{1}\selectfont,rectangle,yshift=-5.25cm,xshift=1cm,align=left] at (current page.north west){\textsc{`r gsub('_','-',params$set_title)` 2025}};
+    \node[anchor=north east,rectangle,,yshift=-0.5cm,xshift=-0.5cm] at (current page.north east){\includegraphics[height=4cm]{../extdata/blackwhite_beestewards_logo.png}};
+    \matrix[matrix anchor=south west, anchor=base, yshift=0.5cm,xshift=1cm, row sep=0pt, column sep=1cm] at (current page.south west) {
+      \node{\includegraphics[height=2cm]{../extdata/OSU_ES-MM_horizontal_2C_O_over_B.png}}; & `r provLogoTeX` \\
+    };
+    
+\end{tikzpicture}
+
+\vspace{0.2cm}
+
+\centering\huge
+
+<!-- \huge 2025 Report for `r params$set_title`  -->
+
+\raggedright\Large
+
+\section{Plant inventory}
+
+\setlength{\columnsep}{-8.5cm}
+
+\begin{multicols}{2}[
+Out of the `r nrow(iNatPlSpp)` identified plant species from your iNaturalist project, \Large`r nrow(filter(iNatPlSpp,!is.na(N)&quality!='poor'))` \Large are bee-friendly plants. Of these plants:
+]
+
+\includegraphics[width=2.5cm]{../extdata/purple_flowers.png}
+
+\columnbreak
+
+\begin{itemize}
+\item \huge`r nrow(superPl_spp)` \Large species are \emph{super} bee plants
+\item \huge`r nrow(filter(iNatPlSpp,isNative))` \Large species are native to your Ecoregion
+\item \huge`r nrow(filter(iNatPlSpp,!isNative|is.na(isNative)))` \Large species are not native to your Ecoregion
+\item \huge`r nrow(filter(iNatPlSpp,isNoxious))` \Large species are noxious weeds
+\end{itemize}
+
+\end{multicols}
+
+<!-- This gets the number of bee species predicted from plant genera (not plant species)-->
+
+\section{Bee inventory}
+
+Based on bee-plant records from Oregon Bee Atlas, we predict that you have \Large`r nrow(suppBeeSpp)` \Large species of bees at your site. `r ifelse(length(beeDivRange)>1,paste0('Similar sites in your ecroegion have ',paste0(range(beeDivRange),collapse=' - '),' species of bees.'),'')`
+The species at your site cover `r length(unique(filter(suppBeeSpp_new,cat=='existing')$lookupFam))` out of the 6 bee families found in North America.
+
+```{r beeFamilyPlot, out.width = '100%', fig.asp=0.35}
+
+if(length(unique(iNatPlDat_vy$year))>1){
+  #Shows additional spp added each year
+  suppBeeSpp_new %>% filter(cat=='existing') %>%
+    mutate(lookupFam=factor(lookupFam,levels= rev(commonFam$Family),labels = rev(commonFam$plotLab))) %>% 
+    pivot_longer(cols=contains('in20'),names_to='year',names_transform = as.factor) %>%
+    group_by(genSpp) %>% mutate(value=cumsum(value)>0) %>% ungroup() %>% filter(value) %>%
+    count(lookupFam,year,.drop=FALSE) %>% pivot_wider(names_from='year',values_from='n') %>% 
+    pivot_longer(cols=contains('in20'),values_to='n',names_to='year') %>% 
+    group_by(lookupFam) %>% mutate(n=ifelse(is.na(n-lag(n)),n,n-lag(n))) %>% ungroup() %>% 
+    filter(n>0) %>% 
+    mutate(year=factor(year,levels=rev(unique(year)),labels=gsub('in','',rev(unique(year))))) %>%
+    ggplot(aes(x=lookupFam,y=n))+
+    geom_col(aes(fill=year),col='black')+
+    labs(x=NULL,y='Number of species',fill='Year')+
+    coord_flip()+
+    scale_fill_brewer(palette = 'Greys',direction = -1)
+  
+} else {
+  suppBeeSpp_new %>% filter(cat=='existing') %>%
+    mutate(lookupFam=factor(lookupFam,levels= rev(commonFam$Family),labels = rev(commonFam$plotLab))) %>%
+    count(lookupFam,.drop=FALSE) %>%
+    ggplot(aes(x=lookupFam,y=n))+
+    geom_col(col='black',fill='grey20')+
+    labs(x=NULL,y='Number of species')+
+    coord_flip()
+}
+
+```
+
+\rule{\linewidth}{1pt}
+
+\footnotesize Stewardship Reports are created using bee-plant interaction data collected by volunteers in the Oregon State University Extension Service Master Melittologist and regional Bee Atlas programs.
+
+<!-- \begin{tikzpicture}[remember picture,overlay] -->
+<!--     <!-- \fill (current page.south west) rectangle ([yshift=0cm] current page text area.north  -| current page.east);  --> 
+<!-- \node[anchor=south east,rectangle,,yshift=0.2cm,xshift=0cm] at (current page marginpar area.north east){\includegraphics[height=3cm]{../extdata/Oregon-BeeAtlas-Logo.png}}; -->
+<!-- \end{tikzpicture} -->
+
+<!-- \node[minimum height = 2.3cm,minimum width=8cm,anchor=south west,font=\color{white}\Huge\linespread{1}\selectfont,rectangle,yshift=-3.5cm,xshift=2.1cm,align=left] at (current page.north west){\textsc{Stewardship Report}}; -->
+<!-- \node[anchor=south east,rectangle,,yshift=0.2cm,xshift=0cm] at (current page marginpar area.north east){\includegraphics[height=4cm]{../extdata/blackwhite_beestewards_logo.png}}; -->
+
+
+\restoregeometry
+
+\clearpage
+
+\section{Glossary}
+
+\begin{table}[h]
+\Large
+\begin{tabular}{p{5cm}p{12cm}}
+\textbf{Ecoregion}       & An ecological region made of ecosystems that have similar climate, geology, soil, and ecology.              \\ [5ex]
+\textbf{Super bee plant} & A plant species that attracts a wide diversity of bees, rare specialist bees, and is native to your region. \\ [5ex]
+\textbf{Exotic plant}    & A plant species that is not native or naturalized in your region.                                             \\ [5ex]
+\textbf{Noxious weed}    & A plant species that is not native or naturalized in your region that causes economic or ecological harm. 
+\end{tabular}
+\end{table}
+
+
+\section{The \emph{super bee plants} at your site}
+
+\Large
+
+`r if(nrow(superPl_spp)>0) 'These species are doing the work at your site to support a diverse community of bees.'`
+`r if(nrow(superPl_spp)<=0) "We didn't find (m)any super bee plants at your site. This might be because they weren't documented in your iNaturalist project, or because your site has a lot of opportunity for growth! On the next page, we've put together a site-specific list of plant species to take your bee habitat up a notch and expand the list of bees your site can support."`
+
+```{r superBeePlantsSpp}
+numPlants <- 8 #Max number of plants to display
+
+if(nrow(superPl_spp)>0){
+  superPl_spp %>%
+  select(Common_name,scientific_name,EstRich,Nrare,Lifecycle,Bloom_start,Bloom_end) %>%
+  slice(1:numPlants) %>%
+  transmute(Plant=linebreak(paste0(Common_name,'\n(\\emph{',scientific_name,'})'),align='r'),
+            `Life cycle`=Lifecycle,
+            `Bloom Time`=paste0(Bloom_start,'-',Bloom_end)) %>%
+  mutate(across(where(is.character),~ifelse(grepl('NA',.x),'-',.x))) %>% #Set NAs as dashes
+  kable(escape=FALSE,format = 'latex',
+        position = "h",longtable=TRUE) %>%
+    kable_styling(latex_options = c("repeat_header")) #%>% column_spec(2,width='3cm') 
+} 
+```
+
+`r if(nrow(superPl_spp)>0) 'These species are listed in order of importance at your site. This data is site-specific, which does not allow for comparisons with other sites.'`
+
+\Large
+\clearpage
+\section{Where are the \emph{super bee plants} located?}
+
+Bee plants are often located in overlooked areas. While some plants are in your cultivated landscaped areas, often they are found growing wild in your headlands. Consider increasing the number of plants in these areas through seeding or cuttings, or by managing weeds and grasses.
+
+```{r fieldMapsSpp, fig.asp=0.75, fig.width=7, warning=FALSE, eval=TRUE}
+
+plantLocs <- iNatPlDat_vy %>% select(-vineyard,-ecoreg) %>% 
+  left_join(select(ecoRegPlSpp,genSpp,isNoxious,quality),by=c('scientific_name'='genSpp')) %>%
+  mutate(across(contains('quality'),as.character)) %>% 
+  # mutate(quality.spp=ifelse(is.na(quality.spp),'poor',quality.spp)) %>% #Set quality to "poor" if unknown - not sure this is the best idea
+  filter(!is.na(quality)) %>% #Filter out plants with unknown quality 
+  mutate(quality=factor(quality,levels=c('poor','good','super')),
+         taxonLevel=ifelse(grepl('.spp',scientific_name),'Genus','Species')) %>% 
+   st_jitter(amount = 3) %>% arrange(quality) #Sorts, so super plants are rendered on top
+
+ext <- st_as_sfc(st_bbox(plantLocs), crs=st_crs(plantLocs)) %>% st_transform(3857) #Extent polygon
+b <- basemap_stars(ext, map_service = "esri", map_type = "world_imagery",verbose = FALSE) #Get basemap
+
+#Species-level map
+ggplot() + geom_stars(data=st_rgb(b))+
+  geom_sf(data=st_transform(filter(plantLocs,taxonLevel=='Species'),st_crs(b)),
+          aes(col=quality),show.legend=TRUE)+
+  geom_text_repel(data = filter(st_transform(plantLocs,st_crs(b)),taxonLevel=='Species',quality=='super'),
+    aes(label = common_name, geometry = geometry),
+    stat = "sf_coordinates",col='cyan',size=3)+
+  labs(x=NULL,y=NULL,col='Plant quality')+
+  theme(axis.text = element_blank(),axis.ticks = element_blank())+
+  scale_colour_manual(values=c('tomato3','purple','cyan'),drop=FALSE)
+
+```
+
+\normalsize
+\vspace{0.5cm}
+
+\Large
+
+
+\clearpage
+\section{Plant recommendations}
+
+There are a few native bee plants from the Willamette Valley region you are currently missing. Adding these species of plants will increase the estimated number of bees at your property from \textbf`r as.character(sum(suppBeeSpp_new$cat=='existing'))` to \textbf`r nrow(suppBeeSpp_new)` species of bees: \large 
+
+\vspace{0.5cm}
+
+```{r plantsToAdd}
+
+addRotate <- function(x) paste0('\\rotatebox[origin=c]{90}{',x,'}')
+
+nPlantsMax <- 15 #Max number of suggested plants
+
+##Version from earlier vineyard reports
+# data.frame(genSpp=plantScoresSpp$PlantGenus) %>% 
+#   left_join(select(plantList,Common_name,Scientific_name,isNative,Lifecycle,Bloom_start,Bloom_end,isNative:isWetland),
+#             by=c('genSpp'='Scientific_name')) %>% 
+#   mutate(Rank=1:n(),Plant=linebreak(paste0(Common_name,'\n(\\emph{',genSpp,'})'),align='r'),
+#             Origin=ifelse(isNative,'Native','Exotic'),
+#             Bloom_period=paste0(Bloom_start,'-',Bloom_end)) %>%
+#   select(Rank,Plant,Lifecycle,Bloom_period) %>% 
+#   rename(`Bloom Period`=Bloom_period,`Plant Species`=Plant) %>% 
+#   group_by(Lifecycle) %>% arrange(desc(Rank)) %>% 
+#   slice(1:nPlantsMax) %>% ungroup() %>% select(-Rank) %>% 
+#   kable(escape=FALSE,format = 'latex',longtable=TRUE) %>% 
+#   kable_styling(latex_options = c("repeat_header","scale_down")) %>% 
+#   column_spec(2:3,width='2cm',latex_valign = 'm') #Warning: argument not atomic vector
+
+plantScoresSpp %>% transmute(genSpp=PlantGenus,Common_name,Lifecycle,Bloom_start,Bloom_end,newBeeFam) %>% 
+  mutate(Plant=linebreak(paste0(Common_name,'\n(\\emph{',genSpp,'})'),align='r')) %>% #Combines plant common/scientific name
+  mutate(Bloom_period=paste0(Bloom_start,'-',Bloom_end)) %>%  #Concatenates bloom period in 1 column
+  mutate(numNewSpp=sapply(strsplit(plantScoresSpp$newSpp,', '),function(x) length(x))) %>% 
+  select(Plant,Lifecycle,Bloom_period,newBeeFam,numNewSpp) %>% 
+  rename(`Bloom Period`=Bloom_period,`Plant Species`=Plant,'Families'=newBeeFam,'Species'=numNewSpp) %>% #Renames columns
+  slice(1:nPlantsMax) %>% #Filters only rows 1:10
+  kable(escape=FALSE,format = 'latex',longtable=TRUE) %>%
+  kable_styling(latex_options = c("repeat_header")) %>%
+  column_spec(2:3,width='2cm',latex_valign = 'm') %>%
+  column_spec(4,width='3cm',latex_valign = 'm') %>% column_spec(5,width='2cm',latex_valign = 'm') %>% 
+  add_header_above(header = c(" " = 3, "Additional Bees" = 2))
+
+```
+
+`r ifelse(nrow(plantScoresSpp)>15,'For a full list of native plants, see Appendix 3.','')`
+
+\newpage
+
+\section*{Additional Bee Diversity}
+
+If you implement the *top five* plants from our recommended plant list, we predict that it will increase your bee diversity in the following bee families:
+
+```{r beeFamilyPlotNew, out.width = '100%', fig.asp=0.4}
+suppBeeSpp_new %>% 
+  mutate(lookupFam=factor(lookupFam,levels= rev(commonFam$Family),labels = rev(commonFam$plotLab))) %>%
+  mutate(cat=factor(cat,levels=c('new','existing'),labels=c('Future','Current'))) %>%
+  count(lookupFam,cat,.drop=FALSE) %>%
+  ggplot(aes(x=lookupFam))+
+  geom_col(aes(y=n,fill=cat),col='black',show.legend = TRUE)+
+  labs(x=NULL,y='Number of species',fill=NULL,title='Target for bee conservation')+
+  scale_fill_manual(values=c('darkorange','grey20'))+
+  coord_flip()
+  
+```
+
+
+```{asis swcdText, echo=unique(iNatPlDat_vy$country)=="USA"}
+
+\Large
+\vspace{0.3cm}
+
+\subsection{Note on implementation}
+
+\textbf{Soil and Water Conservation Districts (SWCD)} offer free technical assistance and site visits to County residents interested in implementing conservation projects on their land. They can help develop a pollinator planting plan that is specific to your site and operation. In addition to pollinator plantings, landowners with streams and riparian areas may be eligible to enroll in a financial assistance program, the \textbf{Conservation Reserve Enhancement Program (CREP)}, to establish native trees and shrubs along creeks. Reach out to your SWCD with this report to help you move forward with restoration plans.
+
+```
+
+\clearpage
+
+\section*{Appendix 1: Predicted bees from your property}
+
+```{r allBees}
+suppBeeSpp %>% select(-contains('in')) %>% rename(Family=lookupFam) %>%
+  group_by(Family) %>% summarize(`Bee Species`=paste0(genSpp,collapse=', '),N=n()) %>%
+  ungroup() %>% mutate(Family=paste0(Family,'\n(',N,' species)')) %>% select(-N) %>%
+  kable(escape=FALSE,format = 'latex',align = c('r','l'),longtable=TRUE) %>%
+  # kable_styling(full_width = TRUE) %>% 
+  column_spec(1,bold = TRUE,width='5cm') %>%
+  column_spec(2,width='10cm',italic = TRUE)
+```
+
+\clearpage
+
+\begin{landscape}
+
+\section*{Appendix 2: Full list of super-bee plants from the iNaturalist project}
+
+```{r fullSuperPlantListSpp}
+if(nrow(superPl_spp)>0){
+  superPl_spp %>%
+  select(Common_name,scientific_name,EstRich,Nrare,isNative,Lifecycle,Bloom_start,Bloom_end) %>%
+  transmute(Plant=linebreak(paste0(Common_name,'\n(\\emph{',scientific_name,'})'),align='r'),
+            `Life cycle`=Lifecycle,
+            `Bloom Time`=paste0(Bloom_start,'-',Bloom_end),
+            `Bee Species`=round(EstRich),`Rare Bees`=Nrare) %>%
+  mutate(across(where(is.character),~ifelse(grepl('NA',.x),'-',.x))) %>% #Set NAs as dashes
+  kable(escape=FALSE,format = 'latex',longtable=TRUE) %>%
+  kable_styling(latex_options = c("repeat_header")) %>% 
+  column_spec(2,width='3cm')
+}
+```
+
+\clearpage
+
+\section*{Appendix 3: Full list of plant recommendations}
+
+```{r fullNewPlantListSpp}
+
+plantScoresSpp %>% transmute(genSpp=PlantGenus,Common_name,Lifecycle,Bloom_start,Bloom_end,newBeeFam) %>% 
+  mutate(Plant=linebreak(paste0(Common_name,'\n(\\emph{',genSpp,'})'),align='r')) %>% #Combines plant common/scientific name
+  mutate(Bloom_period=paste0(Bloom_start,'-',Bloom_end)) %>%  #Concatenates bloom period in 1 column
+  mutate(numNewSpp=sapply(strsplit(plantScoresSpp$newSpp,', '),function(x) length(x))) %>% 
+  select(Plant,Lifecycle,Bloom_period,newBeeFam,numNewSpp) %>% 
+  rename(`Bloom Period`=Bloom_period,`Plant Species`=Plant,'Families'=newBeeFam,'Species'=numNewSpp) %>% #Renames columns
+  kable(escape=FALSE,format = 'latex',longtable=TRUE) %>%
+  kable_styling(latex_options = c("repeat_header")) %>%
+  column_spec(2:3,width='2.25cm',latex_valign = 'm') %>%
+  column_spec(4,width='3cm',latex_valign = 'm') %>% column_spec(5,width='2cm',latex_valign = 'm') %>% 
+  add_header_above(header = c(" " = 3, "Additional Bees" = 2))
+
+```
+
+```{asis badPlantSpp1, eval = FALSE}
+
+\clearpage
+
+\section*{Appendix 4: ``Rogues Gallery'': non-bee plants}
+These plants from your iNaturalist project did not have any matching bee records for your ecoregion, indicating that they may not be useful for foraging bees. We recommend that you prioritize the plants from Appendix 3 to improve bee diversity at your site.
+
+```
+
+```{r badPlantSpp2, eval=FALSE}
+
+iNatPlSpp %>% 
+  filter(N==0,quality=='poor') %>% 
+  select(Common_name,scientific_name,isNative,Lifecycle,Bloom_start,Bloom_end) %>%
+  transmute(Plant=linebreak(paste0(Common_name,'\n(\\emph{',scientific_name,'})'),align='r'),
+            `Life cycle`=Lifecycle,
+            `Bloom Time`=paste0(Bloom_start,'-',Bloom_end)) %>%
+  mutate(across(where(is.character),~ifelse(grepl('NA',.x),'-',.x))) %>% #Set NAs as dashes
+  kable(escape=FALSE,format = 'latex',longtable=TRUE) %>%
+  kable_styling(latex_options = c("repeat_header")) %>% 
+  column_spec(2,width='3cm')
+
+```
+
+\end{landscape}
+
