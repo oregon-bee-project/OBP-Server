@@ -1,7 +1,7 @@
 import Crypto from 'node:crypto'
 
 import { OccurrenceRepository } from '../repositories/index.js'
-import { fieldNames, template, nonEmptyFields, ofvs, abbreviations, determinations, requiredFields } from '../utils/constants.js'
+import { fieldNames, template, nonEmptyFields, ofvs, abbreviations, determinations, requiredFields, blockingFields } from '../utils/constants.js'
 import { includesIllegalSuffix, getDayOfYear, getOFV } from '../utils/utilities.js'
 import ElevationService from './ElevationService.js'
 import PlacesService from './PlacesService.js'
@@ -66,6 +66,16 @@ class OccurrenceService {
         updatedOccurrence[fieldNames.errorFlags] = nonEmptyFields.filter((field) => !updatedOccurrence[field]).concat(errorFields).join(';')
 
         return updatedOccurrence
+    }
+
+    /*
+     * hasBlockingErrorFlags()
+     * Returns whether an occurrence carries an error flag on any field that a printed label depends on
+     */
+    hasBlockingErrorFlags(occurrence) {
+        const flags = occurrence?.[fieldNames.errorFlags]?.split(';') ?? []
+
+        return blockingFields.some((field) => flags.includes(field))
     }
 
     /*
@@ -586,7 +596,7 @@ class OccurrenceService {
 
     /*
      * getPrintableOccurrences()
-     * Returns occurrences that do not have error flags on the constant list of required fields; optional filtering by a list of userLogins, scratch space, and dateLabelPrint
+     * Returns occurrences that have every required field and no error flag on a field a label depends on; optional filtering by a list of userLogins, scratch space, and dateLabelPrint
      */
     async getPrintableOccurrences(options = { userLogins: [], scratch: false, ignoreDateLabelPrint: false }) {
         const {
@@ -613,17 +623,13 @@ class OccurrenceService {
         requiredFields.forEach((field) => filter[field] = { $exists: true, $nin: [ null, '' ] })
         const occurrences = await this.repository.findMany(filter, {}, { [fieldNames.recordedBy]: 1, [fieldNames.fieldNumber]: 1 })
 
-        // Filter out occurrences where any of the required fields show up in errorFlags
-        return occurrences.filter(
-            (occurrence) => !requiredFields.some(
-                (field) => occurrence[fieldNames.errorFlags]?.split(';')?.includes(field) ?? false
-            )
-        )
+        // Filter out occurrences carrying an error flag on any field a label depends on
+        return occurrences.filter((occurrence) => !this.hasBlockingErrorFlags(occurrence))
     }
 
     /*
      * getUnprintableOccurrences()
-     * Returns occurrences that have error flags on the constant list of required fields; optional filtering by dateLabelPrint
+     * Returns occurrences carrying an error flag on a field a label depends on; optional filtering by dateLabelPrint
      */
     async getUnprintableOccurrences(options = { scratch: false, ignoreDateLabelPrint: false }) {
         const {
@@ -646,12 +652,8 @@ class OccurrenceService {
         }
         const occurrences = await this.repository.findMany(filter)
 
-        // Filter all erroneous occurrences down to only those with error flags on the constant list of required fields
-        return occurrences.filter(
-            (occurrence) => requiredFields.some(
-                (field) => occurrence[fieldNames.errorFlags]?.split(';')?.includes(field) ?? false
-            )
-        )
+        // Filter all erroneous occurrences down to only those carrying an error flag on a field a label depends on
+        return occurrences.filter((occurrence) => this.hasBlockingErrorFlags(occurrence))
     }
 
     /*

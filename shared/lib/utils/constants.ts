@@ -111,6 +111,34 @@ const PLANT_LIST_SUPER_BEE = 'SuperBeePlants'
 const PLANT_LIST_URL = 'PlantURL'
 const PLANT_LIST_WEED_URL = 'NoxiousWeedURL'
 
+// Fields that must hold a value before an occurrence can be printed on a label.
+// A missing value here shows up in errorFlags, so this list answers both
+// "is anything missing?" and part of "is anything flagged?".
+const LABEL_REQUIRED_FIELDS = [
+    FIELD_NO,
+    FIRST_NAME_INITIAL,
+    LAST_NAME,
+    SAMPLE_ID,
+    DAY,
+    MONTH,
+    YEAR,
+    COUNTRY,
+    STATE_PROVINCE,
+    LOCALITY,
+    LATITUDE,
+    LONGITUDE,
+    SAMPLING_PROTOCOL
+] as const
+
+// Fields whose error flags keep an occurrence off a label. Every required field
+// qualifies, plus the two privacy fields -- which cannot go in the list above,
+// because they are flagged for *having* a value rather than for lacking one.
+const LABEL_BLOCKING_FIELDS = [
+    ...LABEL_REQUIRED_FIELDS,
+    GEOPRIVACY,
+    TAXON_GEOPRIVACY
+] as const
+
 const constants = {
     // Maximum number of output files stored on the server for each output type
     fileLimits: {
@@ -362,21 +390,9 @@ const constants = {
     },
     labels: {
         // List of mandatory fields for a label to be printed
-        requiredFields: [
-            FIELD_NO,
-            FIRST_NAME_INITIAL,
-            LAST_NAME,
-            SAMPLE_ID,
-            DAY,
-            MONTH,
-            YEAR,
-            COUNTRY,
-            STATE_PROVINCE,
-            LOCALITY,
-            LATITUDE,
-            LONGITUDE,
-            SAMPLING_PROTOCOL
-        ]
+        requiredFields: LABEL_REQUIRED_FIELDS,
+        // List of fields whose error flags keep a label from being printed
+        blockingFields: LABEL_BLOCKING_FIELDS
     },
     usernames: {
         // Username field names
@@ -618,7 +634,7 @@ export const { template, fieldNames, nonEmptyFields, sortConfig } = constants.oc
 export const { observations } = constants
 export const { ofvs, fieldNames: obsFieldNames, template: obsTemplate } = constants.observations
 export const { labels } = constants
-export const { requiredFields } = constants.labels
+export const { requiredFields, blockingFields } = constants.labels
 export const { usernames } = constants
 export const { determinations } = constants
 export const { plants } = constants
