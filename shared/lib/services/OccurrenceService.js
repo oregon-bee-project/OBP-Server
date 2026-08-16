@@ -956,12 +956,25 @@ class OccurrenceService {
         const coordinate = `${occurrence[fieldNames.latitude]},${occurrence[fieldNames.longitude]}`
         updateDocument[fieldNames.elevation] = elevations[coordinate] || ''
 
+        // Prefer the private coordinates here too, so an overwrite cannot replace a
+        //  location we hold precisely with the obscured one
+        const newLocation = this.getObservationLocation(observation)
+
+        // Our access to an observation's true location moves in both directions: an
+        //  observer can grant trust or withdraw it. When it changes, the stored
+        //  location has to change with it, or a withdrawn record keeps coordinates we
+        //  are no longer entitled to (and, because coordinateSource still reads
+        //  'private', keeps them unflagged) while a newly trusted one stays flagged
+        //  with obscured ones. Occurrences predating coordinateSource have no
+        //  recorded provenance, so they are left alone unless we have gained access.
+        const storedSource = occurrence[fieldNames.coordinateSource]
+        const accessChanged = !!observation
+            && newLocation.coordinateSource !== storedSource
+            && (!!storedSource || newLocation.coordinateSource === coordinateSources.private)
+
         // Update the coordinate fields if overwriting
         // Treat an empty accuracy as perfect precision
-        if (overwriteValidLocations) {
-            // Prefer the private coordinates here too, so an overwrite cannot
-            //  replace a location we hold precisely with the obscured one
-            const newLocation = this.getObservationLocation(observation)
+        if (overwriteValidLocations || accessChanged) {
             const newLatitude = newLocation.latitude
             const newLongitude = newLocation.longitude
             const newCoordinate = `${newLatitude},${newLongitude}`
@@ -980,6 +993,14 @@ class OccurrenceService {
         if (observation) {
             updateDocument[fieldNames.resourceRelationship] = 'visits flowers of'
             updateDocument[fieldNames.relatedResourceId] = observation.uuid
+
+            // Refresh the privacy fields. Geoprivacy is not fixed at the moment we
+            //  first see an observation: an observer can obscure a record long after
+            //  we built an occurrence from it, and iNaturalist can obscure one on its
+            //  own when a taxon's conservation status changes. Re-reading them here
+            //  means the error flags below reflect the observation as it stands today.
+            updateDocument[fieldNames.geoprivacy] = observation.geoprivacy ?? ''
+            updateDocument[fieldNames.taxon_geoprivacy] = observation.taxon_geoprivacy ?? ''
 
             // Look up and update the plant taxonomy
             const plantTaxonomy = PlantTaxaService.getPlantAncestry(observation.taxon)
