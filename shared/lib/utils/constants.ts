@@ -29,6 +29,7 @@ const ELEVATION = 'verbatimElevation'
 const LATITUDE = 'decimalLatitude'
 const LONGITUDE = 'decimalLongitude'
 const ACCURACY = 'coordinateUncertaintyInMeters'
+const COORDINATE_SOURCE = 'coordinateSource'
 const SAMPLING_PROTOCOL = 'samplingProtocol'
 const RESOURCE_RELATIONSHIP = 'relationshipOfResource'
 const RESOURCE_ID = 'resourceID'
@@ -61,6 +62,12 @@ const VOL_DET_SEX = 'sexVolDet'
 const VOL_DET_CASTE = 'casteVolDet'
 const GEOPRIVACY = 'geoprivacy'
 const TAXON_GEOPRIVACY = 'taxon_geoprivacy'
+
+// Values for COORDINATE_SOURCE: whether a record's location came from the
+// observation's private (true) coordinates or its public ones, which are
+// deliberately shifted for obscured records
+const COORDINATE_SOURCE_PRIVATE = 'private'
+const COORDINATE_SOURCE_PUBLIC = 'public'
 
 // Observation field names
 const UUID = 'uuid'
@@ -209,6 +216,7 @@ const constants = {
             latitude: LATITUDE,
             longitude: LONGITUDE,
             accuracy: ACCURACY,
+            coordinateSource: COORDINATE_SOURCE,
             samplingProtocol: SAMPLING_PROTOCOL,
             resourceRelationship: RESOURCE_RELATIONSHIP,
             resourceId: RESOURCE_ID,
@@ -274,6 +282,7 @@ const constants = {
             [LATITUDE]: null,
             [LONGITUDE]: null,
             [ACCURACY]: null,
+            [COORDINATE_SOURCE]: null,
             [SAMPLING_PROTOCOL]: null,
             [RESOURCE_RELATIONSHIP]: null,
             [RESOURCE_ID]: null,
@@ -306,6 +315,11 @@ const constants = {
             [VOL_DET_CASTE]: '',
             [GEOPRIVACY]: '',
             [TAXON_GEOPRIVACY]: ''
+        },
+        // Where a record's coordinates came from; see COORDINATE_SOURCE above
+        coordinateSources: {
+            private: COORDINATE_SOURCE_PRIVATE,
+            public: COORDINATE_SOURCE_PUBLIC
         },
         // A list of fields that should be flagged if empty
         nonEmptyFields: [
@@ -630,7 +644,7 @@ export const { auth } = constants
 export const { tasks } = constants
 export const { subtasks } = constants.tasks
 export const { occurrences } = constants
-export const { template, fieldNames, nonEmptyFields, sortConfig } = constants.occurrences
+export const { template, fieldNames, nonEmptyFields, sortConfig, coordinateSources } = constants.occurrences
 export const { observations } = constants
 export const { ofvs, fieldNames: obsFieldNames, template: obsTemplate } = constants.observations
 export const { labels } = constants
