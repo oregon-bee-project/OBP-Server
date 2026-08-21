@@ -75,35 +75,59 @@ export default class OccurrencesSubtaskHandler extends BaseSubtaskHandler {
     async #insertOccurrencesFromBeeIncreases(updateProgress) {
         await updateProgress(0)
 
-        // Query observations with matching occurrences, keeping only one occurrence and the count of matching occurrences
-        const observations = await ObservationViewService.getObservationsWithOccurrences()
-        const occurrences = []
+        // Query the observation/occurrence join view page-by-page and insert new occurrences in
+        // batches, so neither the source observations nor the generated occurrences are ever all
+        // held in memory at once (issue #17). Inserting occurrences for one observation does not
+        // change any other observation's count (they join on distinct iNaturalist URLs), so the
+        // paginated view stays consistent as we go.
+        const flushSize = 5000
+        let pending = []
 
-        let i = 0
-        for (const observation of observations) {
-            const beesCollected = getOFV(observation.ofvs, ofvs.beesCollected)
+        let pageNumber = 1
+        let page = await ObservationViewService.getObservationViewPage(pageNumber)
+        const totalDocuments = page.pagination.totalDocuments
+        let processed = 0
 
-            if (beesCollected > observation.occurrenceCount) {
-                // Create new occurrences to make up the difference between the existing occurrences and the new number of bees collected
-                for (let j = 1; j < beesCollected - observation.occurrenceCount + 1; j++) {
-                    // Duplicate the first occurrence and set its SPECIMEN_ID
-                    const duplicateOccurrence = Object.assign({}, observation.firstOccurrence)
+        while (page.data.length > 0) {
+            for (const observation of page.data) {
+                const beesCollected = getOFV(observation.ofvs, ofvs.beesCollected)
 
-                    duplicateOccurrence[fieldNames.specimenId] = (observation.occurrenceCount + j).toString()
-                    // Clear OBSERVATION_NO and DATE_LABEL_PRINT fields so they can be assigned properly later
-                    duplicateOccurrence[fieldNames.fieldNumber] = ''
-                    duplicateOccurrence[fieldNames.dateLabelPrint] = ''
-                    // Tag the occurrence as new
-                    duplicateOccurrence.new = true
+                if (beesCollected > observation.occurrenceCount) {
+                    // Create new occurrences to make up the difference between the existing occurrences and the new number of bees collected
+                    for (let j = 1; j < beesCollected - observation.occurrenceCount + 1; j++) {
+                        // Duplicate the first occurrence and set its SPECIMEN_ID
+                        const duplicateOccurrence = Object.assign({}, observation.firstOccurrence)
 
-                    occurrences.push(duplicateOccurrence)
+                        duplicateOccurrence[fieldNames.specimenId] = (observation.occurrenceCount + j).toString()
+                        // Clear OBSERVATION_NO and DATE_LABEL_PRINT fields so they can be assigned properly later
+                        duplicateOccurrence[fieldNames.fieldNumber] = ''
+                        duplicateOccurrence[fieldNames.dateLabelPrint] = ''
+                        // Tag the occurrence as new
+                        duplicateOccurrence.new = true
+
+                        pending.push(duplicateOccurrence)
+                    }
                 }
+
+                // Flush the batch once it is large enough to keep memory bounded
+                if (pending.length >= flushSize) {
+                    await OccurrenceService.createOccurrences(pending, { scratch: true })
+                    pending = []
+                }
+
+                await updateProgress(totalDocuments ? 100 * (++processed) / totalDocuments : 100)
             }
 
-            await updateProgress(100 * (++i) / observations.length)
+            // Query the next page
+            page = await ObservationViewService.getObservationViewPage(++pageNumber)
         }
 
-        return await OccurrenceService.createOccurrences(occurrences, { scratch: true })
+        // Insert any remaining occurrences from the final partial batch
+        if (pending.length > 0) {
+            await OccurrenceService.createOccurrences(pending, { scratch: true })
+        }
+
+        await updateProgress(100)
     }
 
     /*
@@ -145,14 +169,16 @@ export default class OccurrencesSubtaskHandler extends BaseSubtaskHandler {
 
         nextFieldNumber = maxFieldNumber ? this.#incrementFieldNumber(maxFieldNumber) : nextFieldNumber
 
-        // Query occurrences page-by-page to avoid memory constraints
-        const updates = []
-        let pageNumber = 1
-        let results = await OccurrenceService.getUnindexedOccurrencesPage({ page: pageNumber, scratch: true })
-        while (pageNumber < results.pagination.totalPages + 1) {
+        // Index occurrences one page at a time, applying each page's updates before fetching the
+        // next. Assigning a field number removes an occurrence from the unindexed set, so we always
+        // drain the first page until none remain. This bounds memory to a single page rather than
+        // accumulating an update for every occurrence up front (issue #17). Occurrences are drained
+        // in composite_sort order, so field numbers are still assigned in the same sequence.
+        let results = await OccurrenceService.getUnindexedOccurrencesPage({ page: 1, scratch: true })
+        while (results.data.length > 0) {
             for (const occurrence of results.data) {
                 // Set field number, and if stateProvince is 'OR', set occurrenceId and resourceId
-                const updateDocument = { ...occurrence, observation: null }
+                const updateDocument = { observation: null }
 
                 updateDocument[fieldNames.fieldNumber] = nextFieldNumber
                 if (occurrence[fieldNames.stateProvince] === 'OR') {
@@ -161,17 +187,18 @@ export default class OccurrencesSubtaskHandler extends BaseSubtaskHandler {
                 }
 
                 const id = OccurrenceService.generateOccurrenceId(occurrence)
-                updates.push({ id, updateDocument })
+                await OccurrenceService.updateOccurrenceById(id, updateDocument)
                 nextFieldNumber = this.#incrementFieldNumber(nextFieldNumber)
             }
 
-            // Query the next page
-            results = await OccurrenceService.getUnindexedOccurrencesPage({ page: ++pageNumber, scratch: true })
-        }
+            // Re-query the first page; the occurrences just indexed have dropped out of the set
+            const previousTotal = results.pagination.totalDocuments
+            results = await OccurrenceService.getUnindexedOccurrencesPage({ page: 1, scratch: true })
 
-        for (const update of updates) {
-            const { id, updateDocument } = update
-            await OccurrenceService.updateOccurrenceById(id, updateDocument)
+            // Safety valve: bail out if a page failed to shrink the set rather than loop forever
+            if (results.pagination.totalDocuments >= previousTotal) {
+                throw new Error('Occurrence indexing did not converge; aborting to avoid an infinite loop')
+            }
         }
     }
 
