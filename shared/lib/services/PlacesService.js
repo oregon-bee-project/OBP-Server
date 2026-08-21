@@ -74,25 +74,21 @@ class PlacesService {
     }
 
     /*
-     * updatePlaces()
-     * Updates local place data from the given observations
+     * updatePlacesFromIds()
+     * Updates local place data from the given place IDs, fetching any not already known
      */
-    async updatePlacesFromObservations(observations, updateProgress) {
+    async updatePlacesFromIds(placeIds, updateProgress) {
         // Read place data
         this.readPlaces()
-    
-        // Compile a list of unknown places from the given observations
+
+        // Compile a list of unknown places from the given IDs
         const unknownPlaces = []
-        for (const observation of observations) {
-            const ids = observation.place_ids ?? []
-            
-            for (const id of ids) {
-                if (!(id in this.places) && !unknownPlaces.includes(id)) {
-                    unknownPlaces.push(id)
-                }
+        for (const id of placeIds ?? []) {
+            if (!(id in this.places) && !unknownPlaces.includes(id)) {
+                unknownPlaces.push(id)
             }
         }
-    
+
         // Fetch data for each unknown place from iNaturalist.org and combine it with the existing data
         if (unknownPlaces.length > 0) {
             const newPlaces = await ApiService.fetchPlacesByIds(unknownPlaces, updateProgress)
@@ -109,9 +105,24 @@ class PlacesService {
                 }
             }
         }
-    
+
         // Store the updated place data
         this.writePlaces()
+    }
+
+    /*
+     * updatePlacesFromObservations()
+     * Updates local place data from the place IDs referenced by the given observations
+     */
+    async updatePlacesFromObservations(observations, updateProgress) {
+        const placeIds = []
+        for (const observation of observations) {
+            for (const id of observation.place_ids ?? []) {
+                placeIds.push(id)
+            }
+        }
+
+        return await this.updatePlacesFromIds(placeIds, updateProgress)
     }
 }
 

@@ -175,6 +175,43 @@ class ApiService {
         )
     }
 
+    /*
+     * fetchUrlByIdsChunks()
+     * Like fetchUrlByIds(), but yields each batch of results as it arrives instead of
+     * accumulating them all in memory. Callers that only pass the results through to the
+     * database can consume this with `for await` and never hold the full set at once.
+     */
+    async *fetchUrlByIdsChunks(buildUrl, pageSize, ids, updateProgress) {
+        await updateProgress(0)
+
+        // ids can be a very long list, so batch requests to avoid iNaturalist API refusal
+        const totalPages = Math.ceil(ids.length / pageSize)
+        let pageStart = 0
+        let pageEnd = Math.min(pageSize, ids.length)
+
+        for (let i = 0; i < totalPages; i++) {
+            const requestUrl = await buildUrl(ids.slice(pageStart, pageEnd).join(','))
+
+            const response = await this.fetchUrl(requestUrl)
+            yield response?.results ?? []
+
+            // Increment page
+            pageStart = pageEnd
+            pageEnd = Math.min(pageEnd + pageSize, ids.length)
+
+            await updateProgress(100 * (i + 1) / totalPages)
+        }
+    }
+
+    async *fetchObservationsByIdsChunks(observationIds, updateProgress) {
+        yield* this.fetchUrlByIdsChunks(
+            (ids) => `https://api.inaturalist.org/v1/observations?per_page=${200}&id=${ids}`,
+            200,
+            observationIds,
+            updateProgress
+        )
+    }
+
     async fetchPlacesByIds(placeIds, updateProgress) {
         return await this.fetchUrlByIds(
             (ids) => `https://api.inaturalist.org/v1/places/${ids}`,

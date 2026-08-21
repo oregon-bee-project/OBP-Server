@@ -97,35 +97,25 @@ class PlantTaxaService {
     }
 
     /*
-     * updateTaxaFromObservations()
-     * Updates local taxonomy data from the given observations
+     * updateTaxaFromIds()
+     * Updates local taxonomy data from the given taxon IDs, fetching any not already known
      */
-    async updateTaxaFromObservations(observations, updateProgress) {
+    async updateTaxaFromIds(taxonIds, updateProgress) {
         // Read taxa data
         this.readTaxa()
-    
-        // Compile a list of unknown taxa from the given observations
+
+        // Compile a list of unknown taxa from the given IDs
         const unknownTaxa = []
-        for (const observation of observations) {
-            const ancestors = observation.taxon?.min_species_ancestry?.split(',') ?? []
-            const synonyms = observation.taxon?.current_synonymous_taxon_ids?.map((id) => id.toString()) ?? []
-    
-            for (const id of ancestors) {
-                if (!(id in this.taxa) && !unknownTaxa.includes(id)) {
-                    unknownTaxa.push(id)
-                }
-            }
-            for (const id of synonyms) {
-                if (!(id in this.taxa) && !unknownTaxa.includes(id)) {
-                    unknownTaxa.push(id)
-                }
+        for (const id of taxonIds ?? []) {
+            if (!(id in this.taxa) && !unknownTaxa.includes(id)) {
+                unknownTaxa.push(id)
             }
         }
-    
+
         // Fetch data for each unknown taxon from iNaturalist.org and combine it with the existing data
         if (unknownTaxa.length > 0) {
             const newTaxa = await ApiService.fetchTaxaByIds(unknownTaxa, updateProgress)
-    
+
             const savedRanks = ['phylum', 'order', 'family', 'genus', 'species']
             for (const newTaxon of newTaxa) {
                 if (savedRanks.includes(newTaxon.rank)) {
@@ -136,9 +126,25 @@ class PlantTaxaService {
                 }
             }
         }
-    
+
         // Store the updated taxonomy data
         this.writeTaxa()
+    }
+
+    /*
+     * updateTaxaFromObservations()
+     * Updates local taxonomy data from the taxon IDs referenced by the given observations
+     */
+    async updateTaxaFromObservations(observations, updateProgress) {
+        const taxonIds = []
+        for (const observation of observations) {
+            const ancestors = observation.taxon?.min_species_ancestry?.split(',') ?? []
+            const synonyms = observation.taxon?.current_synonymous_taxon_ids?.map((id) => id.toString()) ?? []
+
+            taxonIds.push(...ancestors, ...synonyms)
+        }
+
+        return await this.updateTaxaFromIds(taxonIds, updateProgress)
     }
 }
 
