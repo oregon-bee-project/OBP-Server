@@ -1,7 +1,7 @@
 import Crypto from 'node:crypto'
 
 import { OccurrenceRepository } from '../repositories/index.js'
-import { fieldNames, template, nonEmptyFields, ofvs, abbreviations, determinations, requiredFields, blockingFields } from '../utils/constants.js'
+import { fieldNames, template, nonEmptyFields, ofvs, abbreviations, determinations, requiredFields, blockingFields, coordinateSources } from '../utils/constants.js'
 import { includesIllegalSuffix, getDayOfYear, getOFV } from '../utils/utilities.js'
 import ElevationService from './ElevationService.js'
 import PlacesService from './PlacesService.js'
@@ -27,15 +27,21 @@ class OccurrenceService {
         // A list of fields to flag in addition to the non-empty fields
         let errorFields = []
 
-        // Flag records which are obscured or private
-        let isPublic = true
-        if (updatedOccurrence[fieldNames.geoprivacy]) {
-            errorFields.push(fieldNames.geoprivacy)
-            isPublic = false
-        }
-        if (updatedOccurrence[fieldNames.taxon_geoprivacy]) {
-            errorFields.push(fieldNames.taxon_geoprivacy)
-            isPublic = false
+        // Flag records whose true location is withheld from us. An obscured record
+        //  whose observer trusts us with its private coordinates is not withheld:
+        //  we hold the real location, so it needs no flag and its locality is
+        //  checked below like any other record's.
+        const usingPrivateCoordinates = updatedOccurrence[fieldNames.coordinateSource] === coordinateSources.private
+        let locationIsPrecise = true
+        if (!usingPrivateCoordinates) {
+            if (updatedOccurrence[fieldNames.geoprivacy]) {
+                errorFields.push(fieldNames.geoprivacy)
+                locationIsPrecise = false
+            }
+            if (updatedOccurrence[fieldNames.taxon_geoprivacy]) {
+                errorFields.push(fieldNames.taxon_geoprivacy)
+                locationIsPrecise = false
+            }
         }
 
         // Flag country and state if they are too long (unabbreviated)
@@ -46,8 +52,8 @@ class OccurrenceService {
         //  known and if it has one of the following:
         //  Has a street/county suffixes; Has illegal characters; Is too long
         if (
-            isPublic &&
-            (includesIllegalSuffix(updatedOccurrence[fieldNames.locality]) 
+            locationIsPrecise &&
+            (includesIllegalSuffix(updatedOccurrence[fieldNames.locality])
             || /[,"]/.test(updatedOccurrence[fieldNames.locality])
             || updatedOccurrence[fieldNames.locality]?.length > 18)
         ) {
@@ -66,6 +72,38 @@ class OccurrenceService {
         updatedOccurrence[fieldNames.errorFlags] = nonEmptyFields.filter((field) => !updatedOccurrence[field]).concat(errorFields).join(';')
 
         return updatedOccurrence
+    }
+
+    /*
+     * getObservationLocation()
+     * Returns the location fields of an observation, preferring the private (true) values
+     *  over the public ones when the observer trusts us with them
+     */
+    getObservationLocation(observation) {
+        // iNaturalist never substitutes the true coordinates into the public
+        //  fields: for an obscured record, `geojson` is a point shifted by up to
+        //  ~27km and the real one arrives alongside it as `private_geojson`,
+        //  present only when the observer has granted us access
+        const usingPrivate = !!observation?.private_geojson
+        const geojson = observation?.private_geojson ?? observation?.geojson
+        // Fall back field by field rather than all-or-nothing: an observation can
+        //  carry private coordinates but no private place guess, and a coarse
+        //  locality beats none at all (parseLocalityFromPlaceGuess turns undefined
+        //  into a string of bare quote characters)
+        const placeGuess = observation?.private_place_guess ?? observation?.place_guess
+        const placeIds = observation?.private_place_ids ?? observation?.place_ids
+
+        return {
+            latitude: geojson?.coordinates?.at(1)?.toFixed(4)?.toString() ?? '',
+            longitude: geojson?.coordinates?.at(0)?.toFixed(4)?.toString() ?? '',
+            locality: this.parseLocalityFromPlaceGuess(placeGuess),
+            placeIds: placeIds,
+            // Left empty when there are no coordinates at all, so that a record
+            //  we simply have no location for is not labelled as public
+            coordinateSource: geojson
+                ? (usingPrivate ? coordinateSources.private : coordinateSources.public)
+                : ''
+        }
     }
 
     /*
@@ -336,8 +374,11 @@ class OccurrenceService {
         // Look up the plant ancestry and format it
         const plantAncestry = PlantTaxaService.getPlantAncestry(observation.taxon)
 
+        // Read the location, preferring the observation's private coordinates when we have them
+        const location = this.getObservationLocation(observation)
+
         // Parse country, state/province, and county
-        const { country, stateProvince, county } =  PlacesService.getPlaceNames(observation.place_ids)
+        const { country, stateProvince, county } =  PlacesService.getPlaceNames(location.placeIds)
 
         /* Formatted fields as constants */
 
@@ -360,11 +401,11 @@ class OccurrenceService {
         const formattedMonth = !isNaN(observedMonth) ? observedMonth.toString() : ''
         const formattedYear = !isNaN(observedYear) ? observedYear.toString() : ''
         
-        const formattedLocality = this.parseLocalityFromPlaceGuess(observation.place_guess)
+        const formattedLocality = location.locality
 
         // Format the coordinates
-        const formattedLatitude = observation.geojson?.coordinates?.at(1)?.toFixed(4)?.toString() ?? ''
-        const formattedLongitude = observation.geojson?.coordinates?.at(0)?.toFixed(4)?.toString() ?? ''
+        const formattedLatitude = location.latitude
+        const formattedLongitude = location.longitude
 
         /* Final formatting */
 
@@ -405,6 +446,10 @@ class OccurrenceService {
         occurrence[fieldNames.latitude] = formattedLatitude
         occurrence[fieldNames.longitude] = formattedLongitude
         occurrence[fieldNames.accuracy] = observation.positional_accuracy?.toString() ?? ''
+        // Record which coordinate we used. positional_accuracy describes the true
+        //  location even when the public coordinates are obscured, so without this
+        //  an obscured record looks as precise as any other.
+        occurrence[fieldNames.coordinateSource] = location.coordinateSource
 
         occurrence[fieldNames.samplingProtocol] = 'aerial net'
 
@@ -914,19 +959,22 @@ class OccurrenceService {
         // Update the coordinate fields if overwriting
         // Treat an empty accuracy as perfect precision
         if (overwriteValidLocations) {
-            const newLatitude = observation?.geojson?.coordinates?.at(1)?.toFixed(4)?.toString() || ''
-            const newLongitude = observation?.geojson?.coordinates?.at(0)?.toFixed(4)?.toString() || ''
+            // Prefer the private coordinates here too, so an overwrite cannot
+            //  replace a location we hold precisely with the obscured one
+            const newLocation = this.getObservationLocation(observation)
+            const newLatitude = newLocation.latitude
+            const newLongitude = newLocation.longitude
             const newCoordinate = `${newLatitude},${newLongitude}`
             const newAccuracy = observation?.positional_accuracy ?? ''
-            const newLocality = this.parseLocalityFromPlaceGuess(observation?.place_guess)
 
             // Check that either coordinate changed before updating the occurrence fields
-            updateDocument[fieldNames.elevation] = elevations[newCoordinate] 
+            updateDocument[fieldNames.elevation] = elevations[newCoordinate]
                 || await ElevationService.getElevation(newLatitude, newLongitude) || ''
             updateDocument[fieldNames.latitude] = newLatitude
             updateDocument[fieldNames.longitude] = newLongitude
             updateDocument[fieldNames.accuracy] = newAccuracy.toString() || ''
-            updateDocument[fieldNames.locality] = newLocality || occurrence?.locality || ''
+            updateDocument[fieldNames.locality] = newLocation.locality || occurrence?.locality || ''
+            updateDocument[fieldNames.coordinateSource] = newLocation.coordinateSource
         }
 
         if (observation) {

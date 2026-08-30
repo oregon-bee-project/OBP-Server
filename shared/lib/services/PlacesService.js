@@ -84,8 +84,11 @@ class PlacesService {
         // Compile a list of unknown places from the given observations
         const unknownPlaces = []
         for (const observation of observations) {
-            const ids = observation.place_ids ?? []
-            
+            // Occurrences resolve their country/state/county from the private place
+            //  IDs where we have them, so those have to be learned too -- the true
+            //  county is often absent from the public list
+            const ids = observation.private_place_ids ?? observation.place_ids ?? []
+
             for (const id of ids) {
                 if (!(id in this.places) && !unknownPlaces.includes(id)) {
                     unknownPlaces.push(id)
