@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 
 // OccurrenceService is a singleton, and importing it constructs an
 // OccurrenceRepository -- but BaseRepository only stores the collection *name*
@@ -155,6 +155,138 @@ describe('createOccurrenceFromObservation', () => {
 
         expect(occurrence[fieldNames.latitude]).toBe('44.7491')
         expect(occurrence[fieldNames.coordinateSource]).toBe(coordinateSources.public)
+    })
+})
+
+describe('updateOccurrenceFromObservation', () => {
+    // This method is the only part of the re-pull path that writes to Mongo, so
+    // stubbing the repository's updateById lets us inspect exactly what a re-pull
+    // would save without standing up a database.
+    const captureUpdate = () => vi.spyOn(OccurrenceService.repository, 'updateById').mockResolvedValue(undefined)
+
+    afterEach(() => vi.restoreAllMocks())
+
+    const existingOccurrence = {
+        _id: 'an-id',
+        [fieldNames.iNaturalistUrl]: 'https://www.inaturalist.org/observations/1',
+        [fieldNames.latitude]: '44.5646',
+        [fieldNames.longitude]: '-123.2620',
+        [fieldNames.locality]: 'Corvallis',
+        // Built back when the observation was still open, so no privacy values
+        [fieldNames.geoprivacy]: '',
+        [fieldNames.taxon_geoprivacy]: ''
+    }
+
+    it('picks up geoprivacy an observer added after the occurrence was created', async () => {
+        const updateById = captureUpdate()
+
+        await OccurrenceService.updateOccurrenceFromObservation(
+            existingOccurrence,
+            { uri: existingOccurrence[fieldNames.iNaturalistUrl], geoprivacy: 'obscured' },
+            {}
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(updateDocument[fieldNames.geoprivacy]).toBe('obscured')
+        expect(updateDocument[fieldNames.errorFlags].split(';')).toContain(fieldNames.geoprivacy)
+    })
+
+    it('withdraws coordinates when an observer revokes access', async () => {
+        const updateById = captureUpdate()
+
+        // The occurrence holds true coordinates granted earlier; the observation now
+        // comes back obscured with no private_geojson, meaning access is gone
+        await OccurrenceService.updateOccurrenceFromObservation(
+            {
+                ...existingOccurrence,
+                [fieldNames.latitude]: '44.6252',
+                [fieldNames.longitude]: '-122.7695',
+                [fieldNames.coordinateSource]: coordinateSources.private
+            },
+            {
+                uri: existingOccurrence[fieldNames.iNaturalistUrl],
+                geoprivacy: 'obscured',
+                geojson: obscuredObservation.geojson,
+                place_guess: obscuredObservation.place_guess
+            },
+            {}
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        // Coordinates we may no longer publish are replaced by the public ones...
+        expect(updateDocument[fieldNames.latitude]).toBe('44.7491')
+        expect(updateDocument[fieldNames.coordinateSource]).toBe(coordinateSources.public)
+        // ...and the record is flagged, so it cannot reach another label
+        expect(updateDocument[fieldNames.errorFlags].split(';')).toContain(fieldNames.geoprivacy)
+    })
+
+    it('takes up the true coordinates when an observer grants access', async () => {
+        const updateById = captureUpdate()
+
+        await OccurrenceService.updateOccurrenceFromObservation(
+            {
+                ...existingOccurrence,
+                [fieldNames.latitude]: '44.7491',
+                [fieldNames.longitude]: '-122.7652',
+                [fieldNames.geoprivacy]: 'obscured',
+                [fieldNames.coordinateSource]: coordinateSources.public
+            },
+            { uri: existingOccurrence[fieldNames.iNaturalistUrl], ...obscuredObservation },
+            {}
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(updateDocument[fieldNames.latitude]).toBe('44.6252')
+        expect(updateDocument[fieldNames.coordinateSource]).toBe(coordinateSources.private)
+        expect(updateDocument[fieldNames.errorFlags].split(';')).not.toContain(fieldNames.geoprivacy)
+    })
+
+    it('leaves records predating coordinateSource alone', async () => {
+        const updateById = captureUpdate()
+
+        // 380k occurrences carry no coordinateSource. Re-pulling must not rewrite
+        // their locations wholesale -- only flag them, if the observation says so.
+        await OccurrenceService.updateOccurrenceFromObservation(
+            existingOccurrence,
+            {
+                uri: existingOccurrence[fieldNames.iNaturalistUrl],
+                geojson: obscuredObservation.geojson,
+                place_guess: obscuredObservation.place_guess
+            },
+            {}
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(updateDocument[fieldNames.latitude]).toBe('44.5646')
+        expect(updateDocument[fieldNames.locality]).toBe('Corvallis')
+    })
+
+    it('clears geoprivacy an observer has since removed', async () => {
+        const updateById = captureUpdate()
+
+        await OccurrenceService.updateOccurrenceFromObservation(
+            { ...existingOccurrence, [fieldNames.geoprivacy]: 'obscured' },
+            { uri: existingOccurrence[fieldNames.iNaturalistUrl] },
+            {}
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(updateDocument[fieldNames.geoprivacy]).toBe('')
+        expect(updateDocument[fieldNames.errorFlags].split(';')).not.toContain(fieldNames.geoprivacy)
+    })
+
+    it('picks up taxon_geoprivacy iNaturalist applied on its own', async () => {
+        const updateById = captureUpdate()
+
+        await OccurrenceService.updateOccurrenceFromObservation(
+            existingOccurrence,
+            { uri: existingOccurrence[fieldNames.iNaturalistUrl], taxon_geoprivacy: 'obscured' },
+            {}
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(updateDocument[fieldNames.taxon_geoprivacy]).toBe('obscured')
+        expect(updateDocument[fieldNames.errorFlags].split(';')).toContain(fieldNames.taxon_geoprivacy)
     })
 })
 
