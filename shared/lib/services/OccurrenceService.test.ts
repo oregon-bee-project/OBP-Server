@@ -306,6 +306,29 @@ describe('updateOccurrenceFromObservation', () => {
         expect(updateDocument[fieldNames.errorFlags].split(';')).not.toContain(fieldNames.geoprivacy)
     })
 
+    it('keeps the stored locality when the observation has no place guess at all', async () => {
+        const updateById = captureUpdate()
+
+        // Gaining access to the true coordinates runs the location block. This
+        // observation carries no place guess of either kind, and
+        // parseLocalityFromPlaceGuess turns that into bare quote characters, which
+        // are truthy -- so an unguarded fallback overwrites a good stored locality
+        // with punctuation. The elevation is supplied so no GeoTIFF is read.
+        await OccurrenceService.updateOccurrenceFromObservation(
+            existingOccurrence,
+            {
+                uri: existingOccurrence[fieldNames.iNaturalistUrl],
+                geoprivacy: 'obscured',
+                private_geojson: { type: 'Point', coordinates: [ -123.0, 44.0 ] }
+            },
+            { '44.0000,-123.0000': '100' }
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(updateDocument[fieldNames.coordinateSource]).toBe(coordinateSources.private)
+        expect(updateDocument[fieldNames.locality]).toBe('Corvallis')
+    })
+
     it('picks up taxon_geoprivacy iNaturalist applied on its own', async () => {
         const updateById = captureUpdate()
 
@@ -370,6 +393,19 @@ describe('updateErrorFlags', () => {
         })
 
         expect(flags).not.toContain(fieldNames.geoprivacy)
+    })
+
+    it('flags a taxon-obscured record even if it claims private coordinates', () => {
+        // An occurrence built from an observation cannot reach this state, but an
+        // uploaded CSV supplies its own coordinateSource. A record obscured to
+        // protect a species must not become printable because a spreadsheet said so.
+        const flags = flagsOf({
+            ...validOccurrence,
+            [fieldNames.taxon_geoprivacy]: 'obscured',
+            [fieldNames.coordinateSource]: coordinateSources.private
+        })
+
+        expect(flags).toContain(fieldNames.taxon_geoprivacy)
     })
 
     it('checks locality normally once we hold the private coordinates', () => {

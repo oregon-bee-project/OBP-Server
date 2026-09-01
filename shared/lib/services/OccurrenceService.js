@@ -33,15 +33,19 @@ class OccurrenceService {
         //  checked below like any other record's.
         const usingPrivateCoordinates = updatedOccurrence[fieldNames.coordinateSource] === coordinateSources.private
         let locationIsPrecise = true
-        if (!usingPrivateCoordinates) {
-            if (updatedOccurrence[fieldNames.geoprivacy]) {
-                errorFields.push(fieldNames.geoprivacy)
-                locationIsPrecise = false
-            }
-            if (updatedOccurrence[fieldNames.taxon_geoprivacy]) {
-                errorFields.push(fieldNames.taxon_geoprivacy)
-                locationIsPrecise = false
-            }
+        // Only the observer's own geoprivacy can be waived by granting us access
+        if (!usingPrivateCoordinates && updatedOccurrence[fieldNames.geoprivacy]) {
+            errorFields.push(fieldNames.geoprivacy)
+            locationIsPrecise = false
+        }
+        // Taxon geoprivacy is never waived, so it flags unconditionally. Occurrences
+        //  built from an observation cannot reach here holding private coordinates --
+        //  getObservationLocation refuses them -- but an uploaded CSV carries its own
+        //  coordinateSource, and a record obscured to protect a species must not be
+        //  printable because a spreadsheet said 'private'.
+        if (updatedOccurrence[fieldNames.taxon_geoprivacy]) {
+            errorFields.push(fieldNames.taxon_geoprivacy)
+            locationIsPrecise = false
         }
 
         // Flag country and state if they are too long (unabbreviated)
@@ -999,7 +1003,12 @@ class OccurrenceService {
             updateDocument[fieldNames.latitude] = newLatitude
             updateDocument[fieldNames.longitude] = newLongitude
             updateDocument[fieldNames.accuracy] = newAccuracy.toString() || ''
-            updateDocument[fieldNames.locality] = newLocation.locality || occurrence?.locality || ''
+            // parseLocalityFromPlaceGuess returns bare quote characters when there is no
+            //  place guess at all, and those are truthy -- key the fallback off the
+            //  source field so a stored locality is not overwritten with punctuation
+            const hasPlaceGuess = !!(observation?.private_place_guess || observation?.place_guess)
+            updateDocument[fieldNames.locality] = (hasPlaceGuess && newLocation.locality)
+                || occurrence?.[fieldNames.locality] || ''
             updateDocument[fieldNames.coordinateSource] = newLocation.coordinateSource
         }
 

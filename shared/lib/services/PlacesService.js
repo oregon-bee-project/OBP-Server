@@ -117,10 +117,11 @@ class PlacesService {
     async updatePlacesFromObservations(observations, updateProgress) {
         const placeIds = []
         for (const observation of observations) {
-            // Occurrences resolve their country/state/county from the private place
-            //  IDs where we have them, so those have to be learned too -- the true
-            //  county is often absent from the public list
-            for (const id of observation.private_place_ids ?? observation.place_ids ?? []) {
+            // Take both lists. Which one an occurrence reads is
+            //  getObservationLocation's decision and depends on that record's
+            //  geoprivacy, so caching only one leaves the other's names unresolved
+            //  and the record with no county at all.
+            for (const id of [ ...(observation.private_place_ids ?? []), ...(observation.place_ids ?? []) ]) {
                 placeIds.push(id)
             }
         }

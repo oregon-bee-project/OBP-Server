@@ -10,10 +10,17 @@ export default class ObservationRepository extends BaseRepository {
 
     // Read
     async distinctCoordinates() {
-        // Occurrences are built from the private coordinates where we have them, so
-        //  elevations must be looked up for those; keying off the public geojson
-        //  alone leaves every trusted obscured record without an elevation
-        const coordinatesField = { $ifNull: [ '$private_geojson.coordinates', '$geojson.coordinates' ] }
+        // This warms an elevation cache keyed by coordinate, so it takes both points
+        //  rather than choosing between them. Which one an occurrence uses is
+        //  getObservationLocation's decision and depends on that record's geoprivacy;
+        //  the create path reads `elevations[coordinate] || ''` with no fallback, so
+        //  caching the wrong one leaves the record with no elevation at all.
+        const coordinatePairs = {
+            $setUnion: [
+                { $cond: [ { $ifNull: [ '$geojson.coordinates', false ] }, [ '$geojson.coordinates' ], [] ] },
+                { $cond: [ { $ifNull: [ '$private_geojson.coordinates', false ] }, [ '$private_geojson.coordinates' ], [] ] }
+            ]
+        }
 
         const response = await this.aggregate([
             {
@@ -24,13 +31,15 @@ export default class ObservationRepository extends BaseRepository {
                     ]
                 }
             },
+            { $project: { coordinates: coordinatePairs } },
+            { $unwind: '$coordinates' },
             {
                 $group: {
                     _id: {
                         $concat: [
-                            { $toString: { $round: [{ $arrayElemAt: [ coordinatesField, 1 ] }, 4] } },
+                            { $toString: { $round: [{ $arrayElemAt: [ '$coordinates', 1 ] }, 4] } },
                             ',',
-                            { $toString: { $round: [{ $arrayElemAt: [ coordinatesField, 0 ] }, 4] } }
+                            { $toString: { $round: [{ $arrayElemAt: [ '$coordinates', 0 ] }, 4] } }
                         ]
                     }
                 }
