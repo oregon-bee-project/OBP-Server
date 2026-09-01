@@ -83,6 +83,37 @@ describe('getObservationLocation', () => {
         expect(location.placeIds).toEqual([1, 10])
     })
 
+    it('keeps the obscured location when the taxon is obscured, even holding the private one', () => {
+        // iNaturalist obscures this record itself, to protect a species whose
+        // conservation status calls for it. That is not the observer's privacy to
+        // waive, so curator coordinate access does not entitle us to the true point.
+        const taxonObscured = { ...obscuredObservation, taxon_geoprivacy: 'obscured' }
+        const location = OccurrenceService.getObservationLocation(taxonObscured)
+
+        expect(location.latitude).toBe('44.7491')
+        expect(location.longitude).toBe('-122.7652')
+        expect(location.coordinateSource).toBe(coordinateSources.public)
+    })
+
+    it('takes locality and place IDs from the public side too when the taxon is obscured', () => {
+        // private_place_guess names the true place as plainly as the coordinates do,
+        // so it has to travel with them rather than falling back field by field.
+        const taxonObscured = { ...obscuredObservation, taxon_geoprivacy: 'obscured' }
+        const location = OccurrenceService.getObservationLocation(taxonObscured)
+
+        expect(location.locality).not.toBe('Sweet Home')
+        expect(location.placeIds).toEqual([1, 10])
+    })
+
+    it('still uses the private location when only the observer obscured the record', () => {
+        // taxon_geoprivacy 'open' is normalised to null on the way in, but treat an
+        // unnormalised value as obscured rather than trusting it -- erring toward the
+        // public coordinates is the safe direction.
+        const observerOnly = { ...obscuredObservation, taxon_geoprivacy: null }
+        expect(OccurrenceService.getObservationLocation(observerOnly).coordinateSource)
+            .toBe(coordinateSources.private)
+    })
+
     it('reports no source when the observation has no coordinates at all', () => {
         // Records with geoprivacy 'private' arrive with no public geojson, so an
         // empty source distinguishes "no location" from "public location"
@@ -328,16 +359,17 @@ describe('updateErrorFlags', () => {
             .toContain(fieldNames.taxon_geoprivacy)
     })
 
-    it('does not flag an obscured record whose private coordinates we hold', () => {
+    it('does not flag an observer-obscured record whose private coordinates we hold', () => {
+        // Only observer geoprivacy can reach coordinateSource 'private': a
+        // taxon-obscured record keeps the public location, so it keeps its flag
+        // and stays off printed labels.
         const flags = flagsOf({
             ...validOccurrence,
             [fieldNames.geoprivacy]: 'obscured',
-            [fieldNames.taxon_geoprivacy]: 'obscured',
             [fieldNames.coordinateSource]: coordinateSources.private
         })
 
         expect(flags).not.toContain(fieldNames.geoprivacy)
-        expect(flags).not.toContain(fieldNames.taxon_geoprivacy)
     })
 
     it('checks locality normally once we hold the private coordinates', () => {

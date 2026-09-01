@@ -77,21 +77,34 @@ class OccurrenceService {
     /*
      * getObservationLocation()
      * Returns the location fields of an observation, preferring the private (true) values
-     *  over the public ones when the observer trusts us with them
+     *  over the public ones where the observer has granted access and the taxon is not
+     *  itself obscured
      */
     getObservationLocation(observation) {
         // iNaturalist never substitutes the true coordinates into the public
         //  fields: for an obscured record, `geojson` is a point shifted by up to
         //  ~27km and the real one arrives alongside it as `private_geojson`,
-        //  present only when the observer has granted us access
-        const usingPrivate = !!observation?.private_geojson
-        const geojson = observation?.private_geojson ?? observation?.geojson
+        //  present only when we have been granted access.
+        //
+        // Being handed the true location is not the same as being entitled to use
+        //  it. An observer who obscured their own record and then granted us
+        //  access has waived their own privacy, and that is theirs to waive. But
+        //  iNaturalist obscures a record on its own when the taxon's conservation
+        //  status calls for it, protecting the species rather than the observer,
+        //  and no grant of coordinate access waives that. So a taxon-obscured
+        //  record keeps the obscured location whatever we were sent.
+        const taxonObscured = !!observation?.taxon_geoprivacy
+        const usingPrivate = !!observation?.private_geojson && !taxonObscured
+        const geojson = usingPrivate ? observation?.private_geojson : observation?.geojson
         // Fall back field by field rather than all-or-nothing: an observation can
         //  carry private coordinates but no private place guess, and a coarse
         //  locality beats none at all (parseLocalityFromPlaceGuess turns undefined
-        //  into a string of bare quote characters)
-        const placeGuess = observation?.private_place_guess ?? observation?.place_guess
-        const placeIds = observation?.private_place_ids ?? observation?.place_ids
+        //  into a string of bare quote characters). Where we may not use the
+        //  private point, we may not use the private locality either --
+        //  `private_place_guess` names the true place as plainly as the
+        //  coordinates do, so every field comes from the public side together.
+        const placeGuess = (usingPrivate ? observation?.private_place_guess : null) ?? observation?.place_guess
+        const placeIds = (usingPrivate ? observation?.private_place_ids : null) ?? observation?.place_ids
 
         return {
             latitude: geojson?.coordinates?.at(1)?.toFixed(4)?.toString() ?? '',
