@@ -117,7 +117,10 @@ class PlacesService {
     async updatePlacesFromObservations(observations, updateProgress) {
         const placeIds = []
         for (const observation of observations) {
-            for (const id of observation.place_ids ?? []) {
+            // Occurrences resolve their country/state/county from the private place
+            //  IDs where we have them, so those have to be learned too -- the true
+            //  county is often absent from the public list
+            for (const id of observation.private_place_ids ?? observation.place_ids ?? []) {
                 placeIds.push(id)
             }
         }

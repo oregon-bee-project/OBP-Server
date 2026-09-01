@@ -1,11 +1,27 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 
 // OccurrenceService is a singleton, and importing it constructs an
 // OccurrenceRepository -- but BaseRepository only stores the collection *name*
 // and resolves the real collection lazily through a getter, so nothing here
 // touches Mongo. That is what makes these pure helpers testable in isolation.
 import OccurrenceService from './OccurrenceService.js'
-import { fieldNames, requiredFields, blockingFields } from '../utils/constants.js'
+import { fieldNames, requiredFields, blockingFields, coordinateSources } from '../utils/constants.js'
+
+// An obscured observation as iNaturalist returns it to a viewer the observer
+// trusts: the public `geojson` is shifted by up to ~27km and the true point
+// arrives beside it. Note `positional_accuracy` describes the true location in
+// both cases -- it is not privacy-gated, which is why it cannot be used to tell
+// obscured records apart.
+const obscuredObservation = {
+    geoprivacy: 'obscured',
+    positional_accuracy: 4,
+    geojson: { type: 'Point', coordinates: [-122.7652, 44.7491] },
+    place_guess: 'Oregon, US',
+    place_ids: [1, 10],
+    private_geojson: { type: 'Point', coordinates: [-122.7695, 44.6252] },
+    private_place_guess: 'Sweet Home, Oregon, US',
+    private_place_ids: [1, 10, 20]
+}
 
 describe('blockingFields', () => {
     it('covers every required field', () => {
@@ -23,6 +39,55 @@ describe('blockingFields', () => {
         // would select *only* obscured records instead of excluding them.
         expect(requiredFields).not.toContain(fieldNames.geoprivacy)
         expect(requiredFields).not.toContain(fieldNames.taxon_geoprivacy)
+    })
+})
+
+describe('getObservationLocation', () => {
+    it('prefers the private coordinates when the observer trusts us', () => {
+        const location = OccurrenceService.getObservationLocation(obscuredObservation)
+
+        expect(location.latitude).toBe('44.6252')
+        expect(location.longitude).toBe('-122.7695')
+        expect(location.coordinateSource).toBe(coordinateSources.private)
+    })
+
+    it('takes locality and place IDs from the private fields too', () => {
+        const location = OccurrenceService.getObservationLocation(obscuredObservation)
+
+        // 'Sweet Home, Oregon, US' is a three-part place guess, so it parses to a
+        // usable locality; the public 'Oregon, US' would not
+        expect(location.locality).toBe('Sweet Home')
+        expect(location.placeIds).toEqual([1, 10, 20])
+    })
+
+    it('falls back to the public fields when there is no private access', () => {
+        const { private_geojson, private_place_guess, private_place_ids, ...withheld } = obscuredObservation
+        const location = OccurrenceService.getObservationLocation(withheld)
+
+        expect(location.latitude).toBe('44.7491')
+        expect(location.longitude).toBe('-122.7652')
+        expect(location.placeIds).toEqual([1, 10])
+        expect(location.coordinateSource).toBe(coordinateSources.public)
+    })
+
+    it('falls back per field when only the coordinates are private', () => {
+        // An observation can carry a private point with no private place guess.
+        // Falling back all-or-nothing would drop the locality entirely, and
+        // parseLocalityFromPlaceGuess turns undefined into bare quote characters.
+        const { private_place_guess, private_place_ids, ...partial } = obscuredObservation
+        const location = OccurrenceService.getObservationLocation(partial)
+
+        expect(location.latitude).toBe('44.6252')
+        expect(location.coordinateSource).toBe(coordinateSources.private)
+        expect(location.locality).toBe('"Oregon, US""')
+        expect(location.placeIds).toEqual([1, 10])
+    })
+
+    it('reports no source when the observation has no coordinates at all', () => {
+        // Records with geoprivacy 'private' arrive with no public geojson, so an
+        // empty source distinguishes "no location" from "public location"
+        expect(OccurrenceService.getObservationLocation({}).coordinateSource).toBe('')
+        expect(OccurrenceService.getObservationLocation(undefined).coordinateSource).toBe('')
     })
 })
 
@@ -64,6 +129,167 @@ describe('hasBlockingErrorFlags', () => {
     })
 })
 
+describe('createOccurrenceFromObservation', () => {
+    const observation = {
+        ...obscuredObservation,
+        observed_on: '2026-06-14',
+        uri: 'https://www.inaturalist.org/observations/1',
+        user: { id: 1, login: 'a-volunteer' }
+    }
+
+    it('builds the occurrence from the private location', () => {
+        // The trailing `!` tells TypeScript we know this is defined:
+        // createOccurrenceFromObservation returns undefined only when handed no
+        // observation at all, and we always hand it one.
+        const occurrence = OccurrenceService.createOccurrenceFromObservation(observation, {})!
+
+        expect(occurrence[fieldNames.latitude]).toBe('44.6252')
+        expect(occurrence[fieldNames.longitude]).toBe('-122.7695')
+        expect(occurrence[fieldNames.locality]).toBe('Sweet Home')
+        expect(occurrence[fieldNames.coordinateSource]).toBe(coordinateSources.private)
+    })
+
+    it('falls back to the public location, and says so', () => {
+        const { private_geojson, private_place_guess, private_place_ids, ...withheld } = observation
+        const occurrence = OccurrenceService.createOccurrenceFromObservation(withheld, {})!
+
+        expect(occurrence[fieldNames.latitude]).toBe('44.7491')
+        expect(occurrence[fieldNames.coordinateSource]).toBe(coordinateSources.public)
+    })
+})
+
+describe('updateOccurrenceFromObservation', () => {
+    // This method is the only part of the re-pull path that writes to Mongo, so
+    // stubbing the repository's updateById lets us inspect exactly what a re-pull
+    // would save without standing up a database.
+    const captureUpdate = () => vi.spyOn(OccurrenceService.repository, 'updateById').mockResolvedValue(undefined)
+
+    afterEach(() => vi.restoreAllMocks())
+
+    const existingOccurrence = {
+        _id: 'an-id',
+        [fieldNames.iNaturalistUrl]: 'https://www.inaturalist.org/observations/1',
+        [fieldNames.latitude]: '44.5646',
+        [fieldNames.longitude]: '-123.2620',
+        [fieldNames.locality]: 'Corvallis',
+        // Built back when the observation was still open, so no privacy values
+        [fieldNames.geoprivacy]: '',
+        [fieldNames.taxon_geoprivacy]: ''
+    }
+
+    it('picks up geoprivacy an observer added after the occurrence was created', async () => {
+        const updateById = captureUpdate()
+
+        await OccurrenceService.updateOccurrenceFromObservation(
+            existingOccurrence,
+            { uri: existingOccurrence[fieldNames.iNaturalistUrl], geoprivacy: 'obscured' },
+            {}
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(updateDocument[fieldNames.geoprivacy]).toBe('obscured')
+        expect(updateDocument[fieldNames.errorFlags].split(';')).toContain(fieldNames.geoprivacy)
+    })
+
+    it('withdraws coordinates when an observer revokes access', async () => {
+        const updateById = captureUpdate()
+
+        // The occurrence holds true coordinates granted earlier; the observation now
+        // comes back obscured with no private_geojson, meaning access is gone
+        await OccurrenceService.updateOccurrenceFromObservation(
+            {
+                ...existingOccurrence,
+                [fieldNames.latitude]: '44.6252',
+                [fieldNames.longitude]: '-122.7695',
+                [fieldNames.coordinateSource]: coordinateSources.private
+            },
+            {
+                uri: existingOccurrence[fieldNames.iNaturalistUrl],
+                geoprivacy: 'obscured',
+                geojson: obscuredObservation.geojson,
+                place_guess: obscuredObservation.place_guess
+            },
+            {}
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        // Coordinates we may no longer publish are replaced by the public ones...
+        expect(updateDocument[fieldNames.latitude]).toBe('44.7491')
+        expect(updateDocument[fieldNames.coordinateSource]).toBe(coordinateSources.public)
+        // ...and the record is flagged, so it cannot reach another label
+        expect(updateDocument[fieldNames.errorFlags].split(';')).toContain(fieldNames.geoprivacy)
+    })
+
+    it('takes up the true coordinates when an observer grants access', async () => {
+        const updateById = captureUpdate()
+
+        await OccurrenceService.updateOccurrenceFromObservation(
+            {
+                ...existingOccurrence,
+                [fieldNames.latitude]: '44.7491',
+                [fieldNames.longitude]: '-122.7652',
+                [fieldNames.geoprivacy]: 'obscured',
+                [fieldNames.coordinateSource]: coordinateSources.public
+            },
+            { uri: existingOccurrence[fieldNames.iNaturalistUrl], ...obscuredObservation },
+            {}
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(updateDocument[fieldNames.latitude]).toBe('44.6252')
+        expect(updateDocument[fieldNames.coordinateSource]).toBe(coordinateSources.private)
+        expect(updateDocument[fieldNames.errorFlags].split(';')).not.toContain(fieldNames.geoprivacy)
+    })
+
+    it('leaves records predating coordinateSource alone', async () => {
+        const updateById = captureUpdate()
+
+        // 380k occurrences carry no coordinateSource. Re-pulling must not rewrite
+        // their locations wholesale -- only flag them, if the observation says so.
+        await OccurrenceService.updateOccurrenceFromObservation(
+            existingOccurrence,
+            {
+                uri: existingOccurrence[fieldNames.iNaturalistUrl],
+                geojson: obscuredObservation.geojson,
+                place_guess: obscuredObservation.place_guess
+            },
+            {}
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(updateDocument[fieldNames.latitude]).toBe('44.5646')
+        expect(updateDocument[fieldNames.locality]).toBe('Corvallis')
+    })
+
+    it('clears geoprivacy an observer has since removed', async () => {
+        const updateById = captureUpdate()
+
+        await OccurrenceService.updateOccurrenceFromObservation(
+            { ...existingOccurrence, [fieldNames.geoprivacy]: 'obscured' },
+            { uri: existingOccurrence[fieldNames.iNaturalistUrl] },
+            {}
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(updateDocument[fieldNames.geoprivacy]).toBe('')
+        expect(updateDocument[fieldNames.errorFlags].split(';')).not.toContain(fieldNames.geoprivacy)
+    })
+
+    it('picks up taxon_geoprivacy iNaturalist applied on its own', async () => {
+        const updateById = captureUpdate()
+
+        await OccurrenceService.updateOccurrenceFromObservation(
+            existingOccurrence,
+            { uri: existingOccurrence[fieldNames.iNaturalistUrl], taxon_geoprivacy: 'obscured' },
+            {}
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(updateDocument[fieldNames.taxon_geoprivacy]).toBe('obscured')
+        expect(updateDocument[fieldNames.errorFlags].split(';')).toContain(fieldNames.taxon_geoprivacy)
+    })
+})
+
 describe('updateErrorFlags', () => {
     // A minimally valid occurrence: every field that must be non-empty has a
     // value, so any flag raised below comes from the rule under test.
@@ -100,6 +326,44 @@ describe('updateErrorFlags', () => {
     it('flags a record obscured by its taxon', () => {
         expect(flagsOf({ ...validOccurrence, [fieldNames.taxon_geoprivacy]: 'obscured' }))
             .toContain(fieldNames.taxon_geoprivacy)
+    })
+
+    it('does not flag an obscured record whose private coordinates we hold', () => {
+        const flags = flagsOf({
+            ...validOccurrence,
+            [fieldNames.geoprivacy]: 'obscured',
+            [fieldNames.taxon_geoprivacy]: 'obscured',
+            [fieldNames.coordinateSource]: coordinateSources.private
+        })
+
+        expect(flags).not.toContain(fieldNames.geoprivacy)
+        expect(flags).not.toContain(fieldNames.taxon_geoprivacy)
+    })
+
+    it('checks locality normally once we hold the private coordinates', () => {
+        // #42 stopped flagging locality on obscured records because their
+        // locality is coarse. With private access it is precise again, so the
+        // ordinary rules apply -- here, a comma
+        const flags = flagsOf({
+            ...validOccurrence,
+            [fieldNames.geoprivacy]: 'obscured',
+            [fieldNames.coordinateSource]: coordinateSources.private,
+            [fieldNames.locality]: 'Corvallis, OR'
+        })
+
+        expect(flags).toContain(fieldNames.locality)
+    })
+
+    it('still skips the locality check when the location is withheld', () => {
+        const flags = flagsOf({
+            ...validOccurrence,
+            [fieldNames.geoprivacy]: 'obscured',
+            [fieldNames.coordinateSource]: coordinateSources.public,
+            [fieldNames.locality]: '"Oregon, US""'
+        })
+
+        expect(flags).not.toContain(fieldNames.locality)
+        expect(flags).toContain(fieldNames.geoprivacy)
     })
 
     it('keeps an obscured record off a label', () => {

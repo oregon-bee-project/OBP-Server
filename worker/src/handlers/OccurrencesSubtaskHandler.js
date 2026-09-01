@@ -41,7 +41,15 @@ export default class OccurrencesSubtaskHandler extends BaseSubtaskHandler {
                 geojson: 1,
                 taxon: 1,
                 uri: 1,
-                place_guess: 1
+                place_guess: 1,
+                // Needed so an overwrite can prefer the true location where we have it
+                private_geojson: 1,
+                private_place_guess: 1,
+                private_place_ids: 1,
+                // Needed so a re-pull can refresh privacy that changed since the
+                // occurrence was created
+                geoprivacy: 1,
+                taxon_geoprivacy: 1
             }
         }
         let occurrencesResults = await OccurrenceService.getOccurrencesPage({ page: pageNumber, filter: occurrencesFilter })
