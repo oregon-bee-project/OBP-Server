@@ -51,10 +51,35 @@ export default class ObservationRepository extends BaseRepository {
      * Computed in the database so full observation documents never enter memory.
      */
     async distinctPlaceIds(filter = {}) {
+        // This warms a name cache keyed by place ID, so it takes the union of both
+        //  lists rather than choosing between them. Which list an occurrence actually
+        //  reads is getObservationLocation's decision and depends on the record's
+        //  geoprivacy; caching the name of a place we end up not using costs one
+        //  entry, while missing one leaves a record with no county at all.
+        const placeIdsField = {
+            $setUnion: [
+                { $ifNull: [ '$place_ids', [] ] },
+                { $ifNull: [ '$private_place_ids', [] ] }
+            ]
+        }
+
         const response = await this.aggregate([
-            { $match: { ...filter, place_ids: { $exists: true, $ne: null } } },
-            { $unwind: '$place_ids' },
-            { $group: { _id: '$place_ids' } }
+            {
+                $match: {
+                    $and: [
+                        filter,
+                        {
+                            $or: [
+                                { private_place_ids: { $exists: true, $ne: null } },
+                                { place_ids: { $exists: true, $ne: null } }
+                            ]
+                        }
+                    ]
+                }
+            },
+            { $project: { placeIds: placeIdsField } },
+            { $unwind: '$placeIds' },
+            { $group: { _id: '$placeIds' } }
         ])
 
         return response?.map((doc) => doc._id) ?? []
