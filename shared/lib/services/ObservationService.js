@@ -26,6 +26,12 @@ class ObservationService {
             'geojson',
             'user',
             'place_guess',
+            // iNaturalist returns these only for observations whose observer
+            // trusts us with the true location; for everything else they are
+            // absent, which is the normal case rather than an error
+            'private_geojson',
+            'private_place_guess',
+            'private_place_ids',
             'matched'       // Custom field
         ]
         const filteredObservation = {}
