@@ -95,10 +95,15 @@ services:
             server:
                 condition: service_started
         restart: on-failure
+        # Cap the container's memory so a runaway subtask fails predictably instead of
+        # triggering the host's OOM killer. Keep the V8 heap (NODE_OPTIONS below) safely
+        # under this limit so Node throws a catchable error before the kernel steps in.
+        mem_limit: ${WORKER_MEM_LIMIT:-2g}
         env_file: ./.env
         environment:
             - MONGO_HOST=mongo
             - RABBITMQ_HOST=rabbitmq
+            - NODE_OPTIONS=--max-old-space-size=${WORKER_MAX_OLD_SPACE_MB:-1536}
         volumes:
             - ./worker/src:/app/src
             - ./shared:/app/shared
