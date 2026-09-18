@@ -5,7 +5,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 // and resolves the real collection lazily through a getter, so nothing here
 // touches Mongo. That is what makes these pure helpers testable in isolation.
 import OccurrenceService from './OccurrenceService.js'
-import { fieldNames, requiredFields, blockingFields, coordinateSources } from '../utils/constants.js'
+import { fieldNames, requiredFields, coordinateSources } from '../utils/constants.js'
 
 // An obscured observation as iNaturalist returns it to a viewer the observer
 // trusts: the public `geojson` is shifted by up to ~27km and the true point
@@ -23,20 +23,18 @@ const obscuredObservation = {
     private_place_ids: [1, 10, 20]
 }
 
-describe('blockingFields', () => {
-    it('covers every required field', () => {
-        // A missing required value is itself reported as an error flag, so
-        // everything that must be present must also be unflagged.
-        expect(blockingFields).toEqual(expect.arrayContaining([...requiredFields]))
-    })
+describe('requiredFields', () => {
+    it('carries the location fields, and no privacy field', () => {
+        // Privacy does not gate a label; a location does. A record whose true
+        // location was withheld has no coordinates and no locality, so these
+        // three keep it off labels without any privacy field being consulted.
+        expect(requiredFields).toContain(fieldNames.latitude)
+        expect(requiredFields).toContain(fieldNames.longitude)
+        expect(requiredFields).toContain(fieldNames.locality)
 
-    it('adds the privacy fields, which are not required fields', () => {
-        expect(blockingFields).toContain(fieldNames.geoprivacy)
-        expect(blockingFields).toContain(fieldNames.taxon_geoprivacy)
-
-        // These deliberately stay out of requiredFields: getPrintableOccurrences
-        // queries for required fields being non-empty, so listing them there
-        // would select *only* obscured records instead of excluding them.
+        // getPrintableOccurrences queries for required fields being non-empty, so
+        // a privacy field listed here would select exactly the obscured records
+        // instead of excluding them.
         expect(requiredFields).not.toContain(fieldNames.geoprivacy)
         expect(requiredFields).not.toContain(fieldNames.taxon_geoprivacy)
     })
@@ -60,58 +58,66 @@ describe('getObservationLocation', () => {
         expect(location.placeIds).toEqual([1, 10, 20])
     })
 
-    it('falls back to the public fields when there is no private access', () => {
+    it('records no location at all when there is no private access', () => {
+        // The public geojson here is a point up to ~27km from the specimen. It is
+        // not a coarser location, it is a different place, and stored it would be
+        // indistinguishable from a real one.
         const { private_geojson, private_place_guess, private_place_ids, ...withheld } = obscuredObservation
         const location = OccurrenceService.getObservationLocation(withheld)
 
+        expect(location.latitude).toBe('')
+        expect(location.longitude).toBe('')
+        expect(location.locality).toBe('')
+        expect(location.placeIds).toEqual([])
+        expect(location.coordinateSource).toBe('')
+    })
+
+    it('keeps the public location for a record nobody obscured', () => {
+        // With no geoprivacy of either kind, the public point is the true one
+        const open = { geojson: obscuredObservation.geojson, place_guess: 'Sweet Home, Oregon, US', place_ids: [1, 10] }
+        const location = OccurrenceService.getObservationLocation(open)
+
         expect(location.latitude).toBe('44.7491')
-        expect(location.longitude).toBe('-122.7652')
-        expect(location.placeIds).toEqual([1, 10])
+        expect(location.locality).toBe('Sweet Home')
         expect(location.coordinateSource).toBe(coordinateSources.public)
     })
 
-    it('falls back per field when only the coordinates are private', () => {
-        // An observation can carry a private point with no private place guess.
-        // Falling back all-or-nothing would drop the locality entirely, and
-        // parseLocalityFromPlaceGuess turns undefined into bare quote characters.
+    it('takes no locality from the public side when the coordinates are private', () => {
+        // An observation can carry a private point and no private place guess. The
+        // public guess describes the shifted point, so pairing it with the true
+        // coordinates would put a locality in the record that names somewhere else.
         const { private_place_guess, private_place_ids, ...partial } = obscuredObservation
         const location = OccurrenceService.getObservationLocation(partial)
 
         expect(location.latitude).toBe('44.6252')
         expect(location.coordinateSource).toBe(coordinateSources.private)
-        expect(location.locality).toBe('"Oregon, US""')
-        expect(location.placeIds).toEqual([1, 10])
+        expect(location.locality).toBe('')
+        expect(location.placeIds).toEqual([])
     })
 
-    it('keeps the obscured location when the taxon is obscured, even holding the private one', () => {
-        // iNaturalist obscures this record itself, to protect a species whose
-        // conservation status calls for it. That is not the observer's privacy to
-        // waive, so curator coordinate access does not entitle us to the true point.
+    it('uses the private location when the taxon is obscured too', () => {
+        // Whichever kind of obscuring put the true point behind a grant, being
+        // granted it is what decides. Coarsening this record for the species it
+        // protects is a question for whoever exports it onward, and the
+        // taxon_geoprivacy flag it keeps is what marks it for them.
         const taxonObscured = { ...obscuredObservation, taxon_geoprivacy: 'obscured' }
         const location = OccurrenceService.getObservationLocation(taxonObscured)
 
-        expect(location.latitude).toBe('44.7491')
-        expect(location.longitude).toBe('-122.7652')
-        expect(location.coordinateSource).toBe(coordinateSources.public)
+        expect(location.latitude).toBe('44.6252')
+        expect(location.longitude).toBe('-122.7695')
+        expect(location.locality).toBe('Sweet Home')
+        expect(location.placeIds).toEqual([1, 10, 20])
+        expect(location.coordinateSource).toBe(coordinateSources.private)
     })
 
-    it('takes locality and place IDs from the public side too when the taxon is obscured', () => {
-        // private_place_guess names the true place as plainly as the coordinates do,
-        // so it has to travel with them rather than falling back field by field.
-        const taxonObscured = { ...obscuredObservation, taxon_geoprivacy: 'obscured' }
-        const location = OccurrenceService.getObservationLocation(taxonObscured)
+    it('records no location for a taxon-obscured record without private access', () => {
+        const { private_geojson, private_place_guess, private_place_ids, ...withheld } = obscuredObservation
+        const location = OccurrenceService.getObservationLocation({
+            ...withheld, geoprivacy: null, taxon_geoprivacy: 'obscured'
+        })
 
-        expect(location.locality).not.toBe('Sweet Home')
-        expect(location.placeIds).toEqual([1, 10])
-    })
-
-    it('still uses the private location when only the observer obscured the record', () => {
-        // taxon_geoprivacy 'open' is normalised to null on the way in, but treat an
-        // unnormalised value as obscured rather than trusting it -- erring toward the
-        // public coordinates is the safe direction.
-        const observerOnly = { ...obscuredObservation, taxon_geoprivacy: null }
-        expect(OccurrenceService.getObservationLocation(observerOnly).coordinateSource)
-            .toBe(coordinateSources.private)
+        expect(location.latitude).toBe('')
+        expect(location.coordinateSource).toBe('')
     })
 
     it('reports no source when the observation has no coordinates at all', () => {
@@ -136,16 +142,24 @@ describe('hasBlockingErrorFlags', () => {
         expect(OccurrenceService.hasBlockingErrorFlags({ [fieldNames.errorFlags]: 'locality' })).toBe(true)
     })
 
-    it('blocks an obscured occurrence', () => {
-        expect(OccurrenceService.hasBlockingErrorFlags({ [fieldNames.errorFlags]: 'geoprivacy' })).toBe(true)
+    it('passes on a privacy flag alone', () => {
+        // Neither privacy field gates a label. A record whose true location was
+        // withheld is stopped by its empty coordinates, which arrive here as flags
+        // on latitude, longitude and locality; one whose location we do hold has
+        // nothing to be stopped for.
+        expect(OccurrenceService.hasBlockingErrorFlags({ [fieldNames.errorFlags]: 'geoprivacy' })).toBe(false)
+        expect(OccurrenceService.hasBlockingErrorFlags({ [fieldNames.errorFlags]: 'taxon_geoprivacy' })).toBe(false)
     })
 
-    it('blocks an occurrence obscured by its taxon', () => {
-        expect(OccurrenceService.hasBlockingErrorFlags({ [fieldNames.errorFlags]: 'taxon_geoprivacy' })).toBe(true)
+    it('blocks a record whose location was withheld', () => {
+        // The shape updateErrorFlags actually produces for such a record
+        expect(OccurrenceService.hasBlockingErrorFlags({
+            [fieldNames.errorFlags]: 'locality;latitude;longitude;geoprivacy'
+        })).toBe(true)
     })
 
     it('finds a blocking flag anywhere in the semicolon-separated list', () => {
-        expect(OccurrenceService.hasBlockingErrorFlags({ [fieldNames.errorFlags]: 'county;geoprivacy;phylumPlant' })).toBe(true)
+        expect(OccurrenceService.hasBlockingErrorFlags({ [fieldNames.errorFlags]: 'county;locality;phylumPlant' })).toBe(true)
     })
 
     it('does not match on a partial field name', () => {
@@ -180,12 +194,17 @@ describe('createOccurrenceFromObservation', () => {
         expect(occurrence[fieldNames.coordinateSource]).toBe(coordinateSources.private)
     })
 
-    it('falls back to the public location, and says so', () => {
+    it('stores no location, and no locality, when access was withheld', () => {
         const { private_geojson, private_place_guess, private_place_ids, ...withheld } = observation
         const occurrence = OccurrenceService.createOccurrenceFromObservation(withheld, {})!
 
-        expect(occurrence[fieldNames.latitude]).toBe('44.7491')
-        expect(occurrence[fieldNames.coordinateSource]).toBe(coordinateSources.public)
+        expect(occurrence[fieldNames.latitude]).toBe('')
+        expect(occurrence[fieldNames.longitude]).toBe('')
+        expect(occurrence[fieldNames.locality]).toBe('')
+        expect(occurrence[fieldNames.coordinateSource]).toBe('')
+
+        // and it is the empty location, not the geoprivacy, that stops the label
+        expect(OccurrenceService.hasBlockingErrorFlags(occurrence)).toBe(true)
     })
 })
 
@@ -244,11 +263,17 @@ describe('updateOccurrenceFromObservation', () => {
         )
 
         const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
-        // Coordinates we may no longer publish are replaced by the public ones...
-        expect(updateDocument[fieldNames.latitude]).toBe('44.7491')
-        expect(updateDocument[fieldNames.coordinateSource]).toBe(coordinateSources.public)
-        // ...and the record is flagged, so it cannot reach another label
+        // Coordinates we may no longer hold are cleared rather than replaced by the
+        // obscured ones, and the clearing is total -- a locality or elevation left
+        // behind would still describe a location this record no longer has
+        expect(updateDocument[fieldNames.latitude]).toBe('')
+        expect(updateDocument[fieldNames.longitude]).toBe('')
+        expect(updateDocument[fieldNames.locality]).toBe('')
+        expect(updateDocument[fieldNames.elevation]).toBe('')
+        expect(updateDocument[fieldNames.coordinateSource]).toBe('')
+        // The record says why it has no location, and cannot reach another label
         expect(updateDocument[fieldNames.errorFlags].split(';')).toContain(fieldNames.geoprivacy)
+        expect(OccurrenceService.hasBlockingErrorFlags(updateDocument)).toBe(true)
     })
 
     it('takes up the true coordinates when an observer grants access', async () => {
@@ -408,40 +433,40 @@ describe('updateErrorFlags', () => {
         expect(flags).toContain(fieldNames.taxon_geoprivacy)
     })
 
-    it('checks locality normally once we hold the private coordinates', () => {
-        // #42 stopped flagging locality on obscured records because their
-        // locality is coarse. With private access it is precise again, so the
-        // ordinary rules apply -- here, a comma
-        const flags = flagsOf({
-            ...validOccurrence,
-            [fieldNames.geoprivacy]: 'obscured',
-            [fieldNames.coordinateSource]: coordinateSources.private,
-            [fieldNames.locality]: 'Corvallis, OR'
-        })
+    it('checks every locality it is given, whatever its source', () => {
+        // #42 held these checks back for obscured records, whose locality was
+        // iNaturalist's coarse place guess rather than anything the observer could
+        // fix. There is no such locality left to protect: a withheld location now
+        // stores none at all, so a locality in the field describes the true place
+        // whichever source it came from, and faces the ordinary rules -- here, a
+        // comma.
+        for (const source of [ coordinateSources.private, coordinateSources.public ]) {
+            const flags = flagsOf({
+                ...validOccurrence,
+                [fieldNames.geoprivacy]: 'obscured',
+                [fieldNames.coordinateSource]: source,
+                [fieldNames.locality]: 'Corvallis, OR'
+            })
 
-        expect(flags).toContain(fieldNames.locality)
+            expect(flags).toContain(fieldNames.locality)
+        }
     })
 
-    it('still skips the locality check when the location is withheld', () => {
-        const flags = flagsOf({
+    it('keeps a record whose location was withheld off a label', () => {
+        // The point of the whole exercise, and it turns on the empty location
+        // rather than on the geoprivacy: the flags that stop it are the missing
+        // coordinate fields.
+        const withheld = OccurrenceService.updateErrorFlags({
             ...validOccurrence,
             [fieldNames.geoprivacy]: 'obscured',
-            [fieldNames.coordinateSource]: coordinateSources.public,
-            [fieldNames.locality]: '"Oregon, US""'
+            [fieldNames.latitude]: '',
+            [fieldNames.longitude]: '',
+            [fieldNames.locality]: ''
         })
 
-        expect(flags).not.toContain(fieldNames.locality)
-        expect(flags).toContain(fieldNames.geoprivacy)
-    })
-
-    it('keeps an obscured record off a label', () => {
-        // The point of the whole exercise: flagged by updateErrorFlags, and that
-        // flag is one hasBlockingErrorFlags refuses to print.
-        const obscured = OccurrenceService.updateErrorFlags({
-            ...validOccurrence,
-            [fieldNames.geoprivacy]: 'obscured'
-        })
-
-        expect(OccurrenceService.hasBlockingErrorFlags(obscured)).toBe(true)
+        expect(withheld[fieldNames.errorFlags].split(';')).toEqual(
+            expect.arrayContaining([fieldNames.latitude, fieldNames.longitude, fieldNames.locality])
+        )
+        expect(OccurrenceService.hasBlockingErrorFlags(withheld)).toBe(true)
     })
 })
