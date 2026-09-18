@@ -1,7 +1,7 @@
 import Crypto from 'node:crypto'
 
 import { OccurrenceRepository } from '../repositories/index.js'
-import { fieldNames, template, nonEmptyFields, ofvs, abbreviations, determinations, requiredFields, blockingFields, coordinateSources } from '../utils/constants.js'
+import { fieldNames, template, nonEmptyFields, ofvs, abbreviations, determinations, requiredFields, coordinateSources } from '../utils/constants.js'
 import { includesIllegalSuffix, getDayOfYear, getOFV } from '../utils/utilities.js'
 import ElevationService from './ElevationService.js'
 import PlacesService from './PlacesService.js'
@@ -27,39 +27,34 @@ class OccurrenceService {
         // A list of fields to flag in addition to the non-empty fields
         let errorFields = []
 
-        // Flag records whose true location is withheld from us. An obscured record
-        //  whose observer trusts us with its private coordinates is not withheld:
-        //  we hold the real location, so it needs no flag and its locality is
-        //  checked below like any other record's.
+        // Flag a record whose true location was withheld from us. This says nothing
+        //  about the coordinate fields -- getObservationLocation leaves those empty
+        //  rather than storing an obscured point -- it says why they are empty, and
+        //  it is what the geoprivacy email list is built from.
         const usingPrivateCoordinates = updatedOccurrence[fieldNames.coordinateSource] === coordinateSources.private
-        let locationIsPrecise = true
-        // Only the observer's own geoprivacy can be waived by granting us access
         if (!usingPrivateCoordinates && updatedOccurrence[fieldNames.geoprivacy]) {
             errorFields.push(fieldNames.geoprivacy)
-            locationIsPrecise = false
         }
-        // Taxon geoprivacy is never waived, so it flags unconditionally. Occurrences
-        //  built from an observation cannot reach here holding private coordinates --
-        //  getObservationLocation refuses them -- but an uploaded CSV carries its own
-        //  coordinateSource, and a record obscured to protect a species must not be
-        //  printable because a spreadsheet said 'private'.
+        // Taxon geoprivacy flags whether or not we hold the true coordinates, because
+        //  it is not about what we hold: it marks a record whose location must be
+        //  coarsened on its way out to another system, and taxonomists work from it.
         if (updatedOccurrence[fieldNames.taxon_geoprivacy]) {
             errorFields.push(fieldNames.taxon_geoprivacy)
-            locationIsPrecise = false
         }
 
         // Flag country and state if they are too long (unabbreviated)
         if (updatedOccurrence[fieldNames.country]?.length > 3) { errorFields.push(fieldNames.country) }
         if (updatedOccurrence[fieldNames.stateProvince]?.length > 2) { errorFields.push(fieldNames.stateProvince) }
 
-        // Flag locality if the observation's precise location is intended to be 
-        //  known and if it has one of the following:
-        //  Has a street/county suffixes; Has illegal characters; Is too long
+        // Flag locality if it has one of the following:
+        //  Has a street/county suffix; Has illegal characters; Is too long
+        // Every stored locality now describes the true location -- a withheld one
+        //  leaves the field empty, which nonEmptyFields already flags -- so there is
+        //  no longer a coarse locality to hold these checks back for.
         if (
-            locationIsPrecise &&
-            (includesIllegalSuffix(updatedOccurrence[fieldNames.locality])
+            includesIllegalSuffix(updatedOccurrence[fieldNames.locality])
             || /[,"]/.test(updatedOccurrence[fieldNames.locality])
-            || updatedOccurrence[fieldNames.locality]?.length > 18)
+            || updatedOccurrence[fieldNames.locality]?.length > 18
         ) {
             errorFields.push(fieldNames.locality)
         }
@@ -80,9 +75,8 @@ class OccurrenceService {
 
     /*
      * getObservationLocation()
-     * Returns the location fields of an observation, preferring the private (true) values
-     *  over the public ones where the observer has granted access and the taxon is not
-     *  itself obscured
+     * Returns the true location fields of an observation, or empty ones where its true
+     *  location was withheld from us
      */
     getObservationLocation(observation) {
         // iNaturalist never substitutes the true coordinates into the public
@@ -90,35 +84,40 @@ class OccurrenceService {
         //  ~27km and the real one arrives alongside it as `private_geojson`,
         //  present only when we have been granted access.
         //
-        // Being handed the true location is not the same as being entitled to use
-        //  it. An observer who obscured their own record and then granted us
-        //  access has waived their own privacy, and that is theirs to waive. But
-        //  iNaturalist obscures a record on its own when the taxon's conservation
-        //  status calls for it, protecting the species rather than the observer,
-        //  and no grant of coordinate access waives that. So a taxon-obscured
-        //  record keeps the obscured location whatever we were sent.
-        const taxonObscured = !!observation?.taxon_geoprivacy
-        const usingPrivate = !!observation?.private_geojson && !taxonObscured
-        const geojson = usingPrivate ? observation?.private_geojson : observation?.geojson
-        // Fall back field by field rather than all-or-nothing: an observation can
-        //  carry private coordinates but no private place guess, and a coarse
-        //  locality beats none at all (parseLocalityFromPlaceGuess turns undefined
-        //  into a string of bare quote characters). Where we may not use the
-        //  private point, we may not use the private locality either --
-        //  `private_place_guess` names the true place as plainly as the
-        //  coordinates do, so every field comes from the public side together.
-        const placeGuess = (usingPrivate ? observation?.private_place_guess : null) ?? observation?.place_guess
-        const placeIds = (usingPrivate ? observation?.private_place_ids : null) ?? observation?.place_ids
+        // An occurrence holds the true location or none at all. The shifted point
+        //  is not a coarser version of the location, it is a different place, and
+        //  stored it is indistinguishable from a real one -- on a label, in the
+        //  occurrences CSV, and in anything exported onward. So where the true
+        //  point was withheld we record no location, and the empty coordinate
+        //  fields keep the record off labels on their own.
+        const granted = !!observation?.private_geojson
+        const obscured = !!observation?.geoprivacy || !!observation?.taxon_geoprivacy
+
+        if (obscured && !granted) {
+            return { latitude: '', longitude: '', locality: '', placeIds: [], coordinateSource: '' }
+        }
+
+        // Every field comes from the same side as the coordinates. An observation
+        //  can carry a private point and no private place guess, and the public
+        //  guess is then a description of the *other* point -- falling back to it
+        //  would put a locality and a county in the record that do not belong to
+        //  the coordinates beside them. Better to have no locality: an empty one
+        //  is flagged, and a wrong one is not.
+        const geojson = granted ? observation?.private_geojson : observation?.geojson
+        const placeGuess = granted ? observation?.private_place_guess : observation?.place_guess
+        const placeIds = (granted ? observation?.private_place_ids : observation?.place_ids) ?? []
 
         return {
             latitude: geojson?.coordinates?.at(1)?.toFixed(4)?.toString() ?? '',
             longitude: geojson?.coordinates?.at(0)?.toFixed(4)?.toString() ?? '',
-            locality: this.parseLocalityFromPlaceGuess(placeGuess),
+            // parseLocalityFromPlaceGuess turns a missing place guess into bare
+            //  quote characters, which are truthy and would read as a locality
+            locality: placeGuess ? this.parseLocalityFromPlaceGuess(placeGuess) : '',
             placeIds: placeIds,
             // Left empty when there are no coordinates at all, so that a record
             //  we simply have no location for is not labelled as public
             coordinateSource: geojson
-                ? (usingPrivate ? coordinateSources.private : coordinateSources.public)
+                ? (granted ? coordinateSources.private : coordinateSources.public)
                 : ''
         }
     }
@@ -130,7 +129,7 @@ class OccurrenceService {
     hasBlockingErrorFlags(occurrence) {
         const flags = occurrence?.[fieldNames.errorFlags]?.split(';') ?? []
 
-        return blockingFields.some((field) => flags.includes(field))
+        return requiredFields.some((field) => flags.includes(field))
     }
 
     /*
@@ -973,8 +972,7 @@ class OccurrenceService {
         const coordinate = `${occurrence[fieldNames.latitude]},${occurrence[fieldNames.longitude]}`
         updateDocument[fieldNames.elevation] = elevations[coordinate] || ''
 
-        // Prefer the private coordinates here too, so an overwrite cannot replace a
-        //  location we hold precisely with the obscured one
+        // Runs the same rule as the create path: the true location, or none
         const newLocation = this.getObservationLocation(observation)
 
         // Our access to an observation's true location moves in both directions: an
@@ -996,19 +994,23 @@ class OccurrenceService {
             const newLongitude = newLocation.longitude
             const newCoordinate = `${newLatitude},${newLongitude}`
             const newAccuracy = observation?.positional_accuracy ?? ''
+            // An observation whose true location has been withheld yields no location
+            //  at all, and clearing it has to be total: a locality left behind would
+            //  still name the obscured place, and an elevation or accuracy left
+            //  behind would still describe a point we no longer hold. Nothing is
+            //  looked up for an empty coordinate either.
+            const locationWithheld = !newLocation.coordinateSource
 
-            // Check that either coordinate changed before updating the occurrence fields
-            updateDocument[fieldNames.elevation] = elevations[newCoordinate]
-                || await ElevationService.getElevation(newLatitude, newLongitude) || ''
+            updateDocument[fieldNames.elevation] = locationWithheld ? ''
+                : (elevations[newCoordinate] || await ElevationService.getElevation(newLatitude, newLongitude) || '')
             updateDocument[fieldNames.latitude] = newLatitude
             updateDocument[fieldNames.longitude] = newLongitude
-            updateDocument[fieldNames.accuracy] = newAccuracy.toString() || ''
-            // parseLocalityFromPlaceGuess returns bare quote characters when there is no
-            //  place guess at all, and those are truthy -- key the fallback off the
-            //  source field so a stored locality is not overwritten with punctuation
-            const hasPlaceGuess = !!(observation?.private_place_guess || observation?.place_guess)
-            updateDocument[fieldNames.locality] = (hasPlaceGuess && newLocation.locality)
-                || occurrence?.[fieldNames.locality] || ''
+            updateDocument[fieldNames.accuracy] = locationWithheld ? '' : (newAccuracy.toString() || '')
+            // An empty locality here means the observation offered no place guess to
+            //  go with these coordinates, which is no reason to drop one we already
+            //  hold -- unlike a withheld location, where keeping it would be
+            updateDocument[fieldNames.locality] = locationWithheld ? ''
+                : (newLocation.locality || occurrence?.[fieldNames.locality] || '')
             updateDocument[fieldNames.coordinateSource] = newLocation.coordinateSource
         }
 
