@@ -27,10 +27,10 @@ class OccurrenceService {
         // A list of fields to flag in addition to the non-empty fields
         let errorFields = []
 
-        // Flag a record whose true location was withheld from us. This says nothing
-        //  about the coordinate fields -- getObservationLocation leaves those empty
-        //  rather than storing an obscured point -- it says why they are empty, and
-        //  it is what the geoprivacy email list is built from.
+        // Flag a record whose true location was withheld from us. For a new record
+        //  this says why its coordinate fields are empty -- getObservationLocation
+        //  stores no obscured point -- and it is what the geoprivacy email list is
+        //  built from. It is not what keeps a record off a label; hasTrueLocation is.
         const usingPrivateCoordinates = updatedOccurrence[fieldNames.coordinateSource] === coordinateSources.private
         if (!usingPrivateCoordinates && updatedOccurrence[fieldNames.geoprivacy]) {
             errorFields.push(fieldNames.geoprivacy)
@@ -130,6 +130,32 @@ class OccurrenceService {
         const flags = occurrence?.[fieldNames.errorFlags]?.split(';') ?? []
 
         return requiredFields.some((field) => flags.includes(field))
+    }
+
+    /*
+     * hasTrueLocation()
+     * Returns whether an occurrence's coordinates are known to be the true ones: either
+     *  nothing obscured the record, or we hold the private point
+     */
+    hasTrueLocation(occurrence) {
+        // Decided from provenance, not from whether the coordinate fields are empty.
+        //  New records never store an obscured point, but plenty of stored ones do,
+        //  and nothing guarantees they have been cleared: a refresh only reaches the
+        //  occurrences a task selects, and one saved before coordinateSource existed
+        //  keeps its obscured point even through a refresh. Its coordinates look like
+        //  anyone else's, so only its privacy fields can keep it off a label.
+        const obscured = !!occurrence?.[fieldNames.geoprivacy] || !!occurrence?.[fieldNames.taxon_geoprivacy]
+
+        return !obscured || occurrence?.[fieldNames.coordinateSource] === coordinateSources.private
+    }
+
+    /*
+     * isPrintable()
+     * Returns whether an occurrence can go on a label; getPrintableOccurrences and
+     *  getUnprintableOccurrences both answer through this, so they cannot disagree
+     */
+    isPrintable(occurrence) {
+        return !this.hasBlockingErrorFlags(occurrence) && this.hasTrueLocation(occurrence)
     }
 
     /*
@@ -657,7 +683,7 @@ class OccurrenceService {
 
     /*
      * getPrintableOccurrences()
-     * Returns occurrences that have every required field and no error flag on a field a label depends on; optional filtering by a list of userLogins, scratch space, and dateLabelPrint
+     * Returns occurrences that have every required field, no error flag on a field a label depends on, and a location known to be true; optional filtering by a list of userLogins, scratch space, and dateLabelPrint
      */
     async getPrintableOccurrences(options = { userLogins: [], scratch: false, ignoreDateLabelPrint: false }) {
         const {
@@ -684,13 +710,12 @@ class OccurrenceService {
         requiredFields.forEach((field) => filter[field] = { $exists: true, $nin: [ null, '' ] })
         const occurrences = await this.repository.findMany(filter, {}, { [fieldNames.recordedBy]: 1, [fieldNames.fieldNumber]: 1 })
 
-        // Filter out occurrences carrying an error flag on any field a label depends on
-        return occurrences.filter((occurrence) => !this.hasBlockingErrorFlags(occurrence))
+        return occurrences.filter((occurrence) => this.isPrintable(occurrence))
     }
 
     /*
      * getUnprintableOccurrences()
-     * Returns occurrences carrying an error flag on a field a label depends on; optional filtering by dateLabelPrint
+     * Returns flagged occurrences that cannot go on a label; optional filtering by dateLabelPrint
      */
     async getUnprintableOccurrences(options = { scratch: false, ignoreDateLabelPrint: false }) {
         const {
@@ -699,7 +724,8 @@ class OccurrenceService {
         } = options
 
         // Query occurrences with the given scratch value and a nonempty errorFlags field
-        // If a requiredField is missing, it will show up as a flag in errorFlags
+        // If a requiredField is missing, it will show up as a flag in errorFlags, and
+        //  an occurrence without a true location always carries a privacy flag
         const filter = {
             scratch: scratch,
             [fieldNames.errorFlags]: { $exists: true, $nin: [ null, '' ] }
@@ -713,8 +739,7 @@ class OccurrenceService {
         }
         const occurrences = await this.repository.findMany(filter)
 
-        // Filter all erroneous occurrences down to only those carrying an error flag on a field a label depends on
-        return occurrences.filter((occurrence) => this.hasBlockingErrorFlags(occurrence))
+        return occurrences.filter((occurrence) => !this.isPrintable(occurrence))
     }
 
     /*

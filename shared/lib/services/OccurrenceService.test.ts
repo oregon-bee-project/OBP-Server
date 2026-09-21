@@ -25,9 +25,9 @@ const obscuredObservation = {
 
 describe('requiredFields', () => {
     it('carries the location fields, and no privacy field', () => {
-        // Privacy does not gate a label; a location does. A record whose true
-        // location was withheld has no coordinates and no locality, so these
-        // three keep it off labels without any privacy field being consulted.
+        // A new record whose true location was withheld has no coordinates and no
+        // locality, so these three keep it off labels. (Stored records can still
+        // hold an obscured point; hasTrueLocation is what catches those.)
         expect(requiredFields).toContain(fieldNames.latitude)
         expect(requiredFields).toContain(fieldNames.longitude)
         expect(requiredFields).toContain(fieldNames.locality)
@@ -143,10 +143,10 @@ describe('hasBlockingErrorFlags', () => {
     })
 
     it('passes on a privacy flag alone', () => {
-        // Neither privacy field gates a label. A record whose true location was
-        // withheld is stopped by its empty coordinates, which arrive here as flags
-        // on latitude, longitude and locality; one whose location we do hold has
-        // nothing to be stopped for.
+        // A privacy flag is not what blocks a label. The question it stands in for
+        // -- are these coordinates true? -- is answered by hasTrueLocation from the
+        // record's provenance, because a flag alone cannot tell a taxon-obscured
+        // record holding the true point from one still holding the obscured one.
         expect(OccurrenceService.hasBlockingErrorFlags({ [fieldNames.errorFlags]: 'geoprivacy' })).toBe(false)
         expect(OccurrenceService.hasBlockingErrorFlags({ [fieldNames.errorFlags]: 'taxon_geoprivacy' })).toBe(false)
     })
@@ -468,5 +468,89 @@ describe('updateErrorFlags', () => {
             expect.arrayContaining([fieldNames.latitude, fieldNames.longitude, fieldNames.locality])
         )
         expect(OccurrenceService.hasBlockingErrorFlags(withheld)).toBe(true)
+    })
+})
+
+describe('the label gate', () => {
+    afterEach(() => vi.restoreAllMocks())
+
+    // Complete and unflagged, so only its location decides whether it prints
+    const labelled = {
+        _id: 'an-id',
+        [fieldNames.iNaturalistUrl]: 'https://www.inaturalist.org/observations/1',
+        [fieldNames.fieldNumber]: '26001',
+        [fieldNames.firstNameInitial]: 'J.',
+        [fieldNames.lastName]: 'Melitta',
+        [fieldNames.sampleId]: '3',
+        [fieldNames.day]: '14',
+        [fieldNames.month]: '6',
+        [fieldNames.year]: '2026',
+        [fieldNames.country]: 'US',
+        [fieldNames.stateProvince]: 'OR',
+        [fieldNames.locality]: 'Sweet Home',
+        [fieldNames.latitude]: '44.6252',
+        [fieldNames.longitude]: '-122.7695',
+        [fieldNames.samplingProtocol]: 'aerial net',
+        [fieldNames.geoprivacy]: '',
+        [fieldNames.taxon_geoprivacy]: '',
+        [fieldNames.coordinateSource]: coordinateSources.public,
+        [fieldNames.errorFlags]: ''
+    }
+
+    // Stored before #57: obscured, holding the shifted point, and with no
+    // coordinateSource at all. Its coordinates look like any others -- this is
+    // the record the gate exists for.
+    const legacyObscured = {
+        ...labelled,
+        [fieldNames.latitude]: '44.7491',
+        [fieldNames.longitude]: '-122.7652',
+        [fieldNames.geoprivacy]: 'obscured',
+        [fieldNames.coordinateSource]: '',
+        [fieldNames.errorFlags]: 'geoprivacy'
+    }
+
+    it('trusts the location of a record nobody obscured', () => {
+        expect(OccurrenceService.hasTrueLocation(labelled)).toBe(true)
+    })
+
+    it('trusts an obscured record only when we hold the private point', () => {
+        for (const privacy of [ fieldNames.geoprivacy, fieldNames.taxon_geoprivacy ]) {
+            const obscured = { ...labelled, [privacy]: 'obscured' }
+
+            expect(OccurrenceService.hasTrueLocation({ ...obscured, [fieldNames.coordinateSource]: coordinateSources.private })).toBe(true)
+            expect(OccurrenceService.hasTrueLocation({ ...obscured, [fieldNames.coordinateSource]: coordinateSources.public })).toBe(false)
+            expect(OccurrenceService.hasTrueLocation({ ...obscured, [fieldNames.coordinateSource]: '' })).toBe(false)
+        }
+    })
+
+    it('keeps a stored obscured point off a label though no required field is flagged', () => {
+        expect(OccurrenceService.hasBlockingErrorFlags(legacyObscured)).toBe(false)
+        expect(OccurrenceService.isPrintable(legacyObscured)).toBe(false)
+    })
+
+    it('keeps it off after a refresh that could not clear it', async () => {
+        // Without coordinateSource the refresh cannot tell a stored obscured point
+        // from a true one, so it leaves the coordinates where they are. The gate
+        // must hold without the refresh's help.
+        const updateById = vi.spyOn(OccurrenceService.repository, 'updateById').mockResolvedValue(undefined)
+
+        await OccurrenceService.updateOccurrenceFromObservation(legacyObscured, {
+            uri: legacyObscured[fieldNames.iNaturalistUrl],
+            geoprivacy: 'obscured',
+            geojson: { type: 'Point', coordinates: [ -122.7652, 44.7491 ] }
+        }, {})
+
+        const [, refreshed] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(refreshed[fieldNames.latitude]).toBe('44.7491')
+        expect(OccurrenceService.isPrintable(refreshed)).toBe(false)
+    })
+
+    it('sorts it into the unprintable list, not the printable one', async () => {
+        // Both queries hand their Mongo results to isPrintable, so stubbing the
+        // repository shows the split without a database
+        vi.spyOn(OccurrenceService.repository, 'findMany').mockResolvedValue([ labelled, legacyObscured ] as never)
+
+        expect(await OccurrenceService.getPrintableOccurrences()).toEqual([ labelled ])
+        expect(await OccurrenceService.getUnprintableOccurrences()).toEqual([ legacyObscured ])
     })
 })
