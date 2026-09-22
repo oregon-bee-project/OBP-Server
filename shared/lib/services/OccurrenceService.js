@@ -1027,42 +1027,47 @@ class OccurrenceService {
         // Runs the same rule as the create path: the true location, or none
         const newLocation = this.getObservationLocation(observation)
 
-        // Our access to an observation's true location moves in both directions: an
-        //  observer can grant trust or withdraw it. When it changes, the stored
-        //  location has to change with it, or a withdrawn record keeps coordinates we
-        //  are no longer entitled to (and, because coordinateSource still reads
-        //  'private', keeps them unflagged) while a newly trusted one stays flagged
-        //  with obscured ones. Occurrences predating coordinateSource have no
-        //  recorded provenance, so they are left alone unless we have gained access.
+        // Access to an observation's true location moves in both directions: an
+        //  observer can grant trust or withdraw it. Gaining it is what rewrites a
+        //  location -- a record stuck on a worse one takes the better one.
+        //
+        //  Losing it rewrites nothing. A true location we recorded while we were
+        //  entitled to it stays: it is where the specimen in the drawer was
+        //  collected, the label already says so, and deleting it would not unsay
+        //  anything. What the observer's change governs is what we publish, so the
+        //  record keeps its geoprivacy value and is coarsened on the way out to
+        //  another system, exactly as a taxon-obscured record is.
         const storedSource = occurrence[fieldNames.coordinateSource]
+        // A record holding no coordinates at all takes whatever location becomes
+        //  available. It has nothing to lose and no provenance to respect: either it
+        //  was stored empty because the true point was withheld, or it never had one.
+        const storedHasNoLocation = !occurrence[fieldNames.latitude] && !occurrence[fieldNames.longitude]
         const accessChanged = !!observation
             && newLocation.coordinateSource !== storedSource
-            && (!!storedSource || newLocation.coordinateSource === coordinateSources.private)
+            && (!!storedSource || storedHasNoLocation || newLocation.coordinateSource === coordinateSources.private)
 
         // Update the coordinate fields if overwriting
         // Treat an empty accuracy as perfect precision
-        if (overwriteValidLocations || accessChanged) {
+        // An observation with no location to offer leaves the stored one alone --
+        //  nothing true is replaced by nothing at all, whichever way access moved
+        if ((overwriteValidLocations || accessChanged) && !!newLocation.coordinateSource) {
             const newLatitude = newLocation.latitude
             const newLongitude = newLocation.longitude
             const newCoordinate = `${newLatitude},${newLongitude}`
             const newAccuracy = observation?.positional_accuracy ?? ''
-            // An observation whose true location has been withheld yields no location
-            //  at all, and clearing it has to be total: a locality left behind would
-            //  still name the obscured place, and an elevation or accuracy left
-            //  behind would still describe a point we no longer hold. Nothing is
-            //  looked up for an empty coordinate either.
-            const locationWithheld = !newLocation.coordinateSource
 
-            updateDocument[fieldNames.elevation] = locationWithheld ? ''
-                : (elevations[newCoordinate] || await ElevationService.getElevation(newLatitude, newLongitude) || '')
+            updateDocument[fieldNames.elevation] = elevations[newCoordinate]
+                || await ElevationService.getElevation(newLatitude, newLongitude) || ''
             updateDocument[fieldNames.latitude] = newLatitude
             updateDocument[fieldNames.longitude] = newLongitude
-            updateDocument[fieldNames.accuracy] = locationWithheld ? '' : (newAccuracy.toString() || '')
-            // An empty locality here means the observation offered no place guess to
-            //  go with these coordinates, which is no reason to drop one we already
-            //  hold -- unlike a withheld location, where keeping it would be
-            updateDocument[fieldNames.locality] = locationWithheld ? ''
-                : (newLocation.locality || occurrence?.[fieldNames.locality] || '')
+            updateDocument[fieldNames.accuracy] = newAccuracy.toString() || ''
+            // A stored locality describes the point it was stored with, so it can only
+            //  be kept when the coordinates are not moving to a different provenance.
+            //  Where they are, an observation offering no place guess leaves the
+            //  locality empty rather than letting the old one name the new point.
+            const sameProvenance = newLocation.coordinateSource === storedSource
+            updateDocument[fieldNames.locality] = newLocation.locality
+                || (sameProvenance ? occurrence?.[fieldNames.locality] : '') || ''
             updateDocument[fieldNames.coordinateSource] = newLocation.coordinateSource
         }
 

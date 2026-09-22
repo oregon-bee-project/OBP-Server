@@ -241,7 +241,7 @@ describe('updateOccurrenceFromObservation', () => {
         expect(updateDocument[fieldNames.errorFlags].split(';')).toContain(fieldNames.geoprivacy)
     })
 
-    it('withdraws coordinates when an observer revokes access', async () => {
+    it('keeps the true coordinates when an observer revokes access', async () => {
         const updateById = captureUpdate()
 
         // The occurrence holds true coordinates granted earlier; the observation now
@@ -263,17 +263,21 @@ describe('updateOccurrenceFromObservation', () => {
         )
 
         const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
-        // Coordinates we may no longer hold are cleared rather than replaced by the
-        // obscured ones, and the clearing is total -- a locality or elevation left
-        // behind would still describe a location this record no longer has
-        expect(updateDocument[fieldNames.latitude]).toBe('')
-        expect(updateDocument[fieldNames.longitude]).toBe('')
-        expect(updateDocument[fieldNames.locality]).toBe('')
-        expect(updateDocument[fieldNames.elevation]).toBe('')
-        expect(updateDocument[fieldNames.coordinateSource]).toBe('')
-        // The record says why it has no location, and cannot reach another label
-        expect(updateDocument[fieldNames.errorFlags].split(';')).toContain(fieldNames.geoprivacy)
-        expect(OccurrenceService.hasBlockingErrorFlags(updateDocument)).toBe(true)
+        // The stored point is where this specimen was collected, we were entitled to
+        // it when we recorded it, and the label in the drawer already says so --
+        // deleting it would unsay nothing. It is never replaced by the obscured one
+        // either, because nothing true gives way to something false.
+        expect(updateDocument[fieldNames.latitude]).toBe('44.6252')
+        expect(updateDocument[fieldNames.longitude]).toBe('-122.7695')
+        expect(updateDocument[fieldNames.coordinateSource]).toBe(coordinateSources.private)
+
+        // What the observer's change governs is what we publish. The record takes up
+        // the new geoprivacy value, which is what marks it for coarsening on export,
+        // and its location still counts as true, so nothing bars it from a label.
+        // (This fixture is missing most required fields, so isPrintable would be
+        // false for reasons that have nothing to do with privacy.)
+        expect(updateDocument[fieldNames.geoprivacy]).toBe('obscured')
+        expect(OccurrenceService.hasTrueLocation(updateDocument)).toBe(true)
     })
 
     it('takes up the true coordinates when an observer grants access', async () => {
@@ -331,14 +335,14 @@ describe('updateOccurrenceFromObservation', () => {
         expect(updateDocument[fieldNames.errorFlags].split(';')).not.toContain(fieldNames.geoprivacy)
     })
 
-    it('keeps the stored locality when the observation has no place guess at all', async () => {
+    it('drops a locality the new coordinates did not come with', async () => {
         const updateById = captureUpdate()
 
-        // Gaining access to the true coordinates runs the location block. This
-        // observation carries no place guess of either kind, and
-        // parseLocalityFromPlaceGuess turns that into bare quote characters, which
-        // are truthy -- so an unguarded fallback overwrites a good stored locality
-        // with punctuation. The elevation is supplied so no GeoTIFF is read.
+        // Gaining access moves this record onto the true point, 60km from the one it
+        // held. The observation carries no place guess of either kind, so there is no
+        // locality to go with the new coordinates -- and the stored 'Corvallis'
+        // describes the old ones. An empty locality is flagged; a wrong one is not.
+        // The elevation is supplied so no GeoTIFF is read.
         await OccurrenceService.updateOccurrenceFromObservation(
             existingOccurrence,
             {
@@ -351,7 +355,57 @@ describe('updateOccurrenceFromObservation', () => {
 
         const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
         expect(updateDocument[fieldNames.coordinateSource]).toBe(coordinateSources.private)
+        expect(updateDocument[fieldNames.locality]).toBe('')
+    })
+
+    it('keeps the stored locality when the coordinates are not moving provenance', async () => {
+        const updateById = captureUpdate()
+
+        // Same provenance, so the stored locality still describes the point being
+        // written. parseLocalityFromPlaceGuess used to turn a missing place guess
+        // into bare quote characters, which are truthy and would overwrite it.
+        await OccurrenceService.updateOccurrenceFromObservation(
+            { ...existingOccurrence, [fieldNames.coordinateSource]: coordinateSources.private },
+            {
+                uri: existingOccurrence[fieldNames.iNaturalistUrl],
+                geoprivacy: 'obscured',
+                private_geojson: { type: 'Point', coordinates: [ -123.0, 44.0 ] }
+            },
+            { '44.0000,-123.0000': '100' },
+            { overwriteValidLocations: true }
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
         expect(updateDocument[fieldNames.locality]).toBe('Corvallis')
+    })
+
+    it('takes up a location that has become available to a record holding none', async () => {
+        const updateById = captureUpdate()
+
+        // Stored with no location because the true point was withheld; the observer
+        // has since opened the record, so the public point is now the true one.
+        // Without this the record would sit empty forever: its stored source is '',
+        // and the new source is 'public' rather than 'private'.
+        await OccurrenceService.updateOccurrenceFromObservation(
+            {
+                ...existingOccurrence,
+                [fieldNames.latitude]: '',
+                [fieldNames.longitude]: '',
+                [fieldNames.locality]: '',
+                [fieldNames.coordinateSource]: ''
+            },
+            {
+                uri: existingOccurrence[fieldNames.iNaturalistUrl],
+                geojson: { type: 'Point', coordinates: [ -123.0, 44.0 ] },
+                place_guess: 'Corvallis, Oregon, US'
+            },
+            { '44.0000,-123.0000': '100' }
+        )
+
+        const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(updateDocument[fieldNames.latitude]).toBe('44.0000')
+        expect(updateDocument[fieldNames.locality]).toBe('Corvallis')
+        expect(updateDocument[fieldNames.coordinateSource]).toBe(coordinateSources.public)
     })
 
     it('picks up taxon_geoprivacy iNaturalist applied on its own', async () => {
