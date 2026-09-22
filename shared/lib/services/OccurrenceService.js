@@ -1,7 +1,7 @@
 import Crypto from 'node:crypto'
 
 import { OccurrenceRepository } from '../repositories/index.js'
-import { fieldNames, template, nonEmptyFields, ofvs, abbreviations, determinations, requiredFields, coordinateSources } from '../utils/constants.js'
+import { fieldNames, template, nonEmptyFields, markerFields, ofvs, abbreviations, determinations, requiredFields, coordinateSources } from '../utils/constants.js'
 import { includesIllegalSuffix, getDayOfYear, getOFV } from '../utils/utilities.js'
 import ElevationService from './ElevationService.js'
 import PlacesService from './PlacesService.js'
@@ -156,6 +156,17 @@ class OccurrenceService {
      */
     isPrintable(occurrence) {
         return !this.hasBlockingErrorFlags(occurrence) && this.hasTrueLocation(occurrence)
+    }
+
+    /*
+     * hasDefectErrorFlags()
+     * Returns whether an occurrence carries an error flag that reports a fault, as opposed
+     *  to one that only marks the record for whoever handles it later
+     */
+    hasDefectErrorFlags(occurrence) {
+        const flags = occurrence?.[fieldNames.errorFlags]?.split(';')?.filter(Boolean) ?? []
+
+        return flags.some((flag) => !markerFields.includes(flag))
     }
 
     /*
@@ -671,11 +682,27 @@ class OccurrenceService {
             scratch = false
         } = options
 
-        // Query occurrences with empty errorFlags and fieldNumber
+        // Query occurrences with no fieldNumber and no error flag reporting a fault.
+        // The marker flags are skipped here rather than everywhere downstream: a
+        // taxon-obscured record is sound, and refusing it a field number would keep
+        // its specimen off labels forever. This is hasDefectErrorFlags in the database.
         const filter = {
             scratch: scratch,
-            [fieldNames.errorFlags]: { $exists: true, $in: [ null, '' ] },
-            [fieldNames.fieldNumber]: { $exists: true, $in: [ null, '' ] }
+            [fieldNames.errorFlags]: { $exists: true },
+            [fieldNames.fieldNumber]: { $exists: true, $in: [ null, '' ] },
+            $expr: {
+                $eq: [
+                    {
+                        $size: {
+                            $setDifference: [
+                                { $split: [ { $ifNull: [ `$${fieldNames.errorFlags}`, '' ] }, ';' ] },
+                                [ '', ...markerFields ]
+                            ]
+                        }
+                    },
+                    0
+                ]
+            }
         }
         const sortConfig = [ { field: 'composite_sort', direction: 1, type: 'string' } ]
         return await this.repository.paginate({ ...options, filter, sortConfig })

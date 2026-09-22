@@ -330,6 +330,13 @@ const constants = {
             LONGITUDE,
             SAMPLING_PROTOCOL
         ],
+        // Error flags that describe a record rather than fault it. taxon_geoprivacy is
+        // raised for whoever exports the record onward, not because anything about the
+        // record is wrong, so it must not keep a specimen from being given a field
+        // number -- and an unnumbered specimen can never be labelled.
+        markerFields: [
+            TAXON_GEOPRIVACY
+        ],
         // Default sorting hierarchy used by the composite_sort field
         sortConfig: [
             { field: FIELD_NO, direction: 1, type: 'number' },
@@ -633,7 +640,7 @@ export const { auth } = constants
 export const { tasks } = constants
 export const { subtasks } = constants.tasks
 export const { occurrences } = constants
-export const { template, fieldNames, nonEmptyFields, sortConfig, coordinateSources } = constants.occurrences
+export const { template, fieldNames, nonEmptyFields, markerFields, sortConfig, coordinateSources } = constants.occurrences
 export const { observations } = constants
 export const { ofvs, fieldNames: obsFieldNames, template: obsTemplate } = constants.observations
 export const { labels } = constants

@@ -5,7 +5,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 // and resolves the real collection lazily through a getter, so nothing here
 // touches Mongo. That is what makes these pure helpers testable in isolation.
 import OccurrenceService from './OccurrenceService.js'
-import { fieldNames, requiredFields, coordinateSources } from '../utils/constants.js'
+import { fieldNames, requiredFields, markerFields, coordinateSources } from '../utils/constants.js'
 
 // An obscured observation as iNaturalist returns it to a viewer the observer
 // trusts: the public `geojson` is shifted by up to ~27km and the true point
@@ -552,5 +552,51 @@ describe('the label gate', () => {
 
         expect(await OccurrenceService.getPrintableOccurrences()).toEqual([ labelled ])
         expect(await OccurrenceService.getUnprintableOccurrences()).toEqual([ legacyObscured ])
+    })
+})
+
+describe('giving a specimen a field number', () => {
+    afterEach(() => vi.restoreAllMocks())
+
+    it('is not held back by a marker flag', () => {
+        // taxon_geoprivacy is raised for whoever exports the record, not because
+        // anything is wrong with it. A record only reaches a label through a field
+        // number, and only an unflagged record is given one, so treating this flag
+        // as a fault would keep taxon-obscured specimens off labels for good --
+        // which is the thing this branch set out to allow.
+        expect(OccurrenceService.hasDefectErrorFlags({ [fieldNames.errorFlags]: 'taxon_geoprivacy' })).toBe(false)
+        expect(OccurrenceService.hasDefectErrorFlags({ [fieldNames.errorFlags]: '' })).toBe(false)
+        expect(OccurrenceService.hasDefectErrorFlags({})).toBe(false)
+    })
+
+    it('is held back by a real fault, marker flag or not', () => {
+        expect(OccurrenceService.hasDefectErrorFlags({ [fieldNames.errorFlags]: 'locality' })).toBe(true)
+        expect(OccurrenceService.hasDefectErrorFlags({ [fieldNames.errorFlags]: 'taxon_geoprivacy;latitude' })).toBe(true)
+    })
+
+    it('asks the database the same question', async () => {
+        // The database picks which occurrences get numbered, so the query has to
+        // skip the same flags hasDefectErrorFlags does -- hence the shared list
+        const paginate = vi.spyOn(OccurrenceService.repository, 'paginate').mockResolvedValue({ data: [], pagination: {} } as never)
+
+        await OccurrenceService.getUnindexedOccurrencesPage({ page: 1, scratch: true })
+
+        const [{ filter }] = paginate.mock.calls[0] as unknown as [{ filter: Record<string, unknown> }]
+        expect(JSON.stringify(filter.$expr)).toContain(JSON.stringify([ '', ...markerFields ]))
+        // and it no longer demands an entirely empty errorFlags
+        expect(filter[fieldNames.errorFlags]).toEqual({ $exists: true })
+    })
+
+    it('lets a taxon-obscured specimen reach a label once numbered', () => {
+        // The whole path, end to end: sound enough to be numbered, and printable
+        const numbered = {
+            [fieldNames.fieldNumber]: '26001',
+            [fieldNames.errorFlags]: 'taxon_geoprivacy',
+            [fieldNames.taxon_geoprivacy]: 'obscured',
+            [fieldNames.coordinateSource]: coordinateSources.private
+        }
+
+        expect(OccurrenceService.hasDefectErrorFlags(numbered)).toBe(false)
+        expect(OccurrenceService.isPrintable(numbered)).toBe(true)
     })
 })
