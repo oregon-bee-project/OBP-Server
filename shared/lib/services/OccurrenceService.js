@@ -170,6 +170,32 @@ class OccurrenceService {
     }
 
     /*
+     * noDefectFlagsQuery()
+     * Returns the query fragment matching occurrences that hasDefectErrorFlags would pass:
+     *  every flag they carry, if any, only marks the record rather than faulting it
+     */
+    noDefectFlagsQuery() {
+        // The same question as hasDefectErrorFlags, asked of the database, and built
+        //  from the same list so the two cannot drift. A missing or null errorFlags
+        //  counts as no flags at all.
+        return {
+            $expr: {
+                $eq: [
+                    {
+                        $size: {
+                            $setDifference: [
+                                { $split: [ { $ifNull: [ `$${fieldNames.errorFlags}`, '' ] }, ';' ] },
+                                [ '', ...markerFields ]
+                            ]
+                        }
+                    },
+                    0
+                ]
+            }
+        }
+    }
+
+    /*
      * generateOccurrenceId()
      * Creates a unique key string for a given formatted occurrence
      */
@@ -690,19 +716,7 @@ class OccurrenceService {
             scratch: scratch,
             [fieldNames.errorFlags]: { $exists: true },
             [fieldNames.fieldNumber]: { $exists: true, $in: [ null, '' ] },
-            $expr: {
-                $eq: [
-                    {
-                        $size: {
-                            $setDifference: [
-                                { $split: [ { $ifNull: [ `$${fieldNames.errorFlags}`, '' ] }, ';' ] },
-                                [ '', ...markerFields ]
-                            ]
-                        }
-                    },
-                    0
-                ]
-            }
+            ...this.noDefectFlagsQuery()
         }
         const sortConfig = [ { field: 'composite_sort', direction: 1, type: 'string' } ]
         return await this.repository.paginate({ ...options, filter, sortConfig })

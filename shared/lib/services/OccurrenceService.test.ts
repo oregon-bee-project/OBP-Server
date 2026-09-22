@@ -152,9 +152,12 @@ describe('hasBlockingErrorFlags', () => {
     })
 
     it('blocks a record whose location was withheld', () => {
-        // The shape updateErrorFlags actually produces for such a record
+        // The shape updateErrorFlags actually produces for such a record, built from
+        // fieldNames so it cannot quietly stop matching the real column names
         expect(OccurrenceService.hasBlockingErrorFlags({
-            [fieldNames.errorFlags]: 'locality;latitude;longitude;geoprivacy'
+            [fieldNames.errorFlags]: [
+                fieldNames.locality, fieldNames.latitude, fieldNames.longitude, fieldNames.geoprivacy
+            ].join(';')
         })).toBe(true)
     })
 
@@ -462,9 +465,9 @@ describe('updateErrorFlags', () => {
     })
 
     it('does not flag an observer-obscured record whose private coordinates we hold', () => {
-        // Only observer geoprivacy can reach coordinateSource 'private': a
-        // taxon-obscured record keeps the public location, so it keeps its flag
-        // and stays off printed labels.
+        // The flag means "the true location is withheld from us", so holding the
+        // private point clears it. A taxon-obscured record reaches this state too,
+        // and keeps its own flag, which marks it for coarsening on export.
         const flags = flagsOf({
             ...validOccurrence,
             [fieldNames.geoprivacy]: 'obscured',
@@ -474,10 +477,13 @@ describe('updateErrorFlags', () => {
         expect(flags).not.toContain(fieldNames.geoprivacy)
     })
 
-    it('flags a taxon-obscured record even if it claims private coordinates', () => {
-        // An occurrence built from an observation cannot reach this state, but an
-        // uploaded CSV supplies its own coordinateSource. A record obscured to
-        // protect a species must not become printable because a spreadsheet said so.
+    it('flags a taxon-obscured record even holding private coordinates', () => {
+        // The flag is not about what we hold: it marks the record for coarsening on
+        // the way out to another system, and holding the true point is exactly when
+        // that matters. Note what this does NOT do any more -- the flag no longer
+        // keeps the record off a label, so an uploaded CSV asserting
+        // coordinateSource 'private' is believed, the same as any other coordinate a
+        // spreadsheet supplies. See 'believes an uploaded coordinateSource' below.
         const flags = flagsOf({
             ...validOccurrence,
             [fieldNames.taxon_geoprivacy]: 'obscured',
@@ -652,5 +658,44 @@ describe('giving a specimen a field number', () => {
 
         expect(OccurrenceService.hasDefectErrorFlags(numbered)).toBe(false)
         expect(OccurrenceService.isPrintable(numbered)).toBe(true)
+    })
+})
+
+describe('where the gate is deliberately conservative', () => {
+    // Two states worth pinning down, because in both the record's coordinates are
+    // fine and the gate still says no. Neither occurs in production today.
+
+    it('believes an uploaded coordinateSource', () => {
+        // An occurrence built from an observation cannot claim 'private' falsely,
+        // but a CSV upload supplies the column itself, and the dashboard can PUT it
+        // without flags being recomputed. A spreadsheet asserting 'private' over an
+        // obscured row is therefore taken at its word -- the same trust every other
+        // coordinate in an uploaded row gets, but worth stating rather than assuming.
+        const uploaded = {
+            [fieldNames.taxon_geoprivacy]: 'obscured',
+            [fieldNames.coordinateSource]: coordinateSources.private,
+            [fieldNames.errorFlags]: 'taxon_geoprivacy'
+        }
+
+        expect(OccurrenceService.hasTrueLocation(uploaded)).toBe(true)
+        expect(OccurrenceService.isPrintable(uploaded)).toBe(true)
+    })
+
+    it('holds back a true point that was recorded while the observation was open', () => {
+        // Created open, so coordinateSource is 'public' and the point is the true
+        // one; the observation was obscured afterwards. We keep the coordinates --
+        // that is the rule -- but the gate reads 'public' plus a privacy value as
+        // "not known true" and refuses the label. For a record built from an
+        // observation that reading is now wrong, since a withheld location is stored
+        // empty rather than as a public point; it stays because an uploaded row can
+        // still mean the old thing by it, and refusing a label is the safe error.
+        const openThenObscured = {
+            [fieldNames.latitude]: '44.6252',
+            [fieldNames.longitude]: '-122.7695',
+            [fieldNames.geoprivacy]: 'obscured',
+            [fieldNames.coordinateSource]: coordinateSources.public
+        }
+
+        expect(OccurrenceService.hasTrueLocation(openThenObscured)).toBe(false)
     })
 })

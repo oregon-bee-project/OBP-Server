@@ -268,19 +268,24 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
         await TaskService.logTaskStep(taskId, 'Writing output files')
         await TaskService.updateProgressPercentageById(taskId, 0)
 
-        // Write unflagged scratch space occurrences to the occurrences output file
+        // Write sound scratch space occurrences to the occurrences output file.
+        // This file is what a following labels subtask prints from, so it takes
+        //  records carrying only a marker flag: a taxon-obscured record is sound,
+        //  and leaving it here for the flags file alone would keep its specimen off
+        //  labels however well the rest of the pipeline behaved.
         const occurrencesFilter = {
             scratch: true,
-            $or: [
-                { [fieldNames.errorFlags]: { $exists: false } },
-                { [fieldNames.errorFlags]: { $in: [ null, '' ] } }
-            ]
+            ...OccurrenceService.noDefectFlagsQuery()
         }
         await OccurrenceService.writeOccurrencesFromDatabase(occurrencesFilePath, occurrencesFilter)
 
         await TaskService.updateProgressPercentageById(taskId, 100 / 3)
         
-        // Write unprinted, flagged scratch space occurrences to the flags output file
+        // Write unprinted, flagged scratch space occurrences to the flags output file.
+        // Marker flags are deliberately included: this file feeds the emails subtask,
+        //  and the taxon-privacy contact list is built from exactly those records.
+        // A marker-flagged record therefore appears here and in the occurrences file,
+        //  which is right -- it is sound enough to label and still worth writing about.
         const flagsFilter = {
             scratch: true,
             [fieldNames.errorFlags]: { $exists: true, $nin: [ null, '' ] },
@@ -293,14 +298,12 @@ export default class ObservationsSubtaskHandler extends BaseSubtaskHandler {
 
         await TaskService.updateProgressPercentageById(taskId, 100 * 2 / 3)
 
-        // Write new unflagged scratch space occurrences to the pulls output file
+        // Write new sound scratch space occurrences to the pulls output file, which a
+        //  following labels subtask can print from just as it can the occurrences file
         const pullsFilter = {
             scratch: true,
             new: true,
-            $or: [
-                { [fieldNames.errorFlags]: { $exists: false } },
-                { [fieldNames.errorFlags]: { $in: [ null, '' ] } }
-            ]
+            ...OccurrenceService.noDefectFlagsQuery()
         }
         await OccurrenceService.writeOccurrencesFromDatabase(pullsFilePath, pullsFilter)
 
