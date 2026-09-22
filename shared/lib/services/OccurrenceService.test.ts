@@ -361,24 +361,27 @@ describe('updateOccurrenceFromObservation', () => {
         expect(updateDocument[fieldNames.locality]).toBe('')
     })
 
-    it('keeps the stored locality when the coordinates are not moving provenance', async () => {
+    it('keeps a true locality when gaining access moves nothing', async () => {
         const updateById = captureUpdate()
 
-        // Same provenance, so the stored locality still describes the point being
-        // written. parseLocalityFromPlaceGuess used to turn a missing place guess
-        // into bare quote characters, which are truthy and would overwrite it.
+        // This record was built while its observation was open, so it already holds
+        // the true point; the observer has since obscured it and granted us access.
+        // The private point is the point we already had, so 'Corvallis' describes it
+        // as well as it ever did -- and the observation offers no private place
+        // guess, which must not be allowed to empty a true locality.
         await OccurrenceService.updateOccurrenceFromObservation(
-            { ...existingOccurrence, [fieldNames.coordinateSource]: coordinateSources.private },
+            existingOccurrence,
             {
                 uri: existingOccurrence[fieldNames.iNaturalistUrl],
                 geoprivacy: 'obscured',
-                private_geojson: { type: 'Point', coordinates: [ -123.0, 44.0 ] }
+                private_geojson: { type: 'Point', coordinates: [ -123.2620, 44.5646 ] }
             },
-            { '44.0000,-123.0000': '100' },
-            { overwriteValidLocations: true }
+            { '44.5646,-123.2620': '100' }
         )
 
         const [, updateDocument] = updateById.mock.calls[0] as [unknown, Record<string, string>]
+        expect(updateDocument[fieldNames.latitude]).toBe('44.5646')
+        expect(updateDocument[fieldNames.coordinateSource]).toBe(coordinateSources.private)
         expect(updateDocument[fieldNames.locality]).toBe('Corvallis')
     })
 

@@ -1075,13 +1075,16 @@ class OccurrenceService {
             updateDocument[fieldNames.latitude] = newLatitude
             updateDocument[fieldNames.longitude] = newLongitude
             updateDocument[fieldNames.accuracy] = newAccuracy.toString() || ''
-            // A stored locality describes the point it was stored with, so it can only
-            //  be kept when the coordinates are not moving to a different provenance.
-            //  Where they are, an observation offering no place guess leaves the
-            //  locality empty rather than letting the old one name the new point.
-            const sameProvenance = newLocation.coordinateSource === storedSource
+            // A stored locality describes the point it was stored with, so it survives
+            //  only where that point is not moving. Gaining access often moves nothing
+            //  -- a record built while its observation was open already holds the true
+            //  point -- and there the locality is as true as it ever was. Where the
+            //  point does move, an observation offering no place guess leaves the
+            //  locality empty rather than letting the old one name the new place.
+            const coordinatesUnchanged = newLatitude === occurrence?.[fieldNames.latitude]
+                && newLongitude === occurrence?.[fieldNames.longitude]
             updateDocument[fieldNames.locality] = newLocation.locality
-                || (sameProvenance ? occurrence?.[fieldNames.locality] : '') || ''
+                || (coordinatesUnchanged ? occurrence?.[fieldNames.locality] : '') || ''
             updateDocument[fieldNames.coordinateSource] = newLocation.coordinateSource
         }
 
