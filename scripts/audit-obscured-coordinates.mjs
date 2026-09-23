@@ -17,7 +17,7 @@ import ApiService from './shared/lib/services/ApiService.js'
 import DatabaseManager from './shared/lib/database/DatabaseManager.js'
 import { fieldNames } from './shared/lib/utils/constants.js'
 
-const PROJECTS = ['18521', '166376', '99706']
+const PROJECTS = { '18521': 'Oregon Bee Atlas', '166376': 'Washington Bee Atlas', '99706': 'Master Melittologist' }
 const FILTERS = ['geoprivacy=obscured%2Cprivate', 'taxon_geoprivacy=obscured%2Cprivate']
 const TRUE_WITHIN_KM = 0.1
 const STAND_IN_BEYOND_KM = 5
@@ -28,9 +28,10 @@ if (!apiToken) {
     process.exit(1)
 }
 
-// Every currently obscured observation in the source projects, keyed by id
+// Every currently obscured observation in the source projects, keyed by id,
+// remembering which projects (atlases) each was found in
 const observations = new Map()
-for (const project of PROJECTS) {
+for (const project of Object.keys(PROJECTS)) {
     for (const filter of FILTERS) {
         let idAbove = 0
         for (;;) {
@@ -41,7 +42,11 @@ for (const project of PROJECTS) {
                 process.exit(1)
             }
             const { results } = await response.json()
-            for (const observation of results) observations.set(observation.id, observation)
+            for (const observation of results) {
+                const known = observations.get(observation.id) ?? { ...observation, atlases: new Set() }
+                known.atlases.add(PROJECTS[project])
+                observations.set(observation.id, known)
+            }
             if (results.length < 200) break
             idAbove = results.at(-1).id
             await new Promise((resolve) => setTimeout(resolve, 1100))
@@ -73,12 +78,13 @@ const count = (verdict, printed) => {
     if (printed) tally[verdict].printed++
 }
 const wrong = []
+const unsettled = []
 let matchedObservations = 0
 
 for (const observation of observations.values()) {
     const records = await occurrences.find(
         { [fieldNames.iNaturalistUrl]: observation.uri },
-        { projection: { [fieldNames.fieldNumber]: 1, [fieldNames.latitude]: 1, [fieldNames.longitude]: 1, [fieldNames.locality]: 1, [fieldNames.dateLabelPrint]: 1 } }
+        { projection: { [fieldNames.fieldNumber]: 1, [fieldNames.latitude]: 1, [fieldNames.longitude]: 1, [fieldNames.locality]: 1, [fieldNames.stateProvince]: 1, [fieldNames.year]: 1, [fieldNames.iNaturalistAlias]: 1, [fieldNames.dateLabelPrint]: 1 } }
     ).toArray()
     if (records.length === 0) continue
     matchedObservations++
@@ -106,18 +112,22 @@ for (const observation of observations.values()) {
                 : '5 between'
         }
         count(verdict, printed)
-        if (verdict.startsWith('1') || verdict.startsWith('2')) {
-            wrong.push({
-                fieldNumber: record[fieldNames.fieldNumber],
-                labelPrinted: record[fieldNames.dateLabelPrint] || '',
-                localityOnLabel: record[fieldNames.locality],
-                latitudeOnLabel: record[fieldNames.latitude],
-                longitudeOnLabel: record[fieldNames.longitude],
-                kmFromTruePoint: distance?.toFixed(1) ?? '',
-                whyWrong: verdict.slice(2),
-                observation: observation.uri
-            })
+        const row = {
+            fieldNumber: record[fieldNames.fieldNumber],
+            labelPrinted: record[fieldNames.dateLabelPrint] || '',
+            collectionYear: record[fieldNames.year],
+            collector: record[fieldNames.iNaturalistAlias],
+            atlas: [...observation.atlases].join('; '),
+            stateOnLabel: record[fieldNames.stateProvince],
+            localityOnLabel: record[fieldNames.locality],
+            latitudeOnLabel: record[fieldNames.latitude],
+            longitudeOnLabel: record[fieldNames.longitude],
+            kmFromTruePoint: distance?.toFixed(1) ?? '',
+            verdict: verdict.slice(2),
+            observation: observation.uri
         }
+        if (verdict.startsWith('1') || verdict.startsWith('2')) wrong.push(row)
+        if (verdict.startsWith('4') || verdict.startsWith('5')) unsettled.push(row)
     }
 }
 
@@ -129,11 +139,18 @@ console.log(JSON.stringify({
     tally
 }, null, 2))
 
-// The list for whoever decides about the pinned labels. Stand-in points are
-// what iNaturalist publishes, so nothing here reveals a true location.
-console.error(`\n${wrong.length} specimens hold a stand-in; written to audit-wrong-points.csv`)
-const header = Object.keys(wrong[0] ?? { fieldNumber: 1 })
-const csv = [header.join(','), ...wrong.map((row) => header.map((key) => JSON.stringify(row[key] ?? '')).join(','))].join('\n')
-await import('node:fs').then((fs) => fs.writeFileSync('audit-wrong-points.csv', csv + '\n'))
+// Two lists: the stand-ins, for whoever decides about the pinned labels, and
+// the specimens that cannot be settled until their observer grants access.
+// Stand-in points are what iNaturalist publishes, so nothing here reveals a
+// true location.
+const fs = await import('node:fs')
+const writeCsv = (name, rows) => {
+    const header = Object.keys(rows[0] ?? { fieldNumber: 1 })
+    const csv = [header.join(','), ...rows.map((row) => header.map((key) => JSON.stringify(row[key] ?? '')).join(','))].join('\n')
+    fs.writeFileSync(name, csv + '\n')
+    console.error(`${rows.length} specimens written to ${name}`)
+}
+writeCsv('audit-wrong-points.csv', wrong)
+writeCsv('audit-unsettled-points.csv', unsettled)
 
 process.exit(0)
