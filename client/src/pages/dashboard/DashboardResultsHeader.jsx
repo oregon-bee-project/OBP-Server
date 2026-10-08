@@ -151,6 +151,7 @@ export default function DashboardResultsHeader({ handleEnter, disabled }) {
                 >
                     <option value='fieldNumber'>fieldNumber</option>
                     <option value='date'>date</option>
+                    <option value='dateLabelPrint'>dateLabelPrint</option>
                 </select>
                 <select
                     id='sortDir'
