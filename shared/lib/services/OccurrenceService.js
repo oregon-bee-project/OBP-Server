@@ -1,7 +1,7 @@
 import Crypto from 'node:crypto'
 
 import { OccurrenceRepository } from '../repositories/index.js'
-import { fieldNames, template, nonEmptyFields, ofvs, abbreviations, determinations, requiredFields } from '../utils/constants.js'
+import { fieldNames, template, nonEmptyFields, markerFields, ofvs, abbreviations, determinations, requiredFields, coordinateSources } from '../utils/constants.js'
 import { includesIllegalSuffix, getDayOfYear, getOFV } from '../utils/utilities.js'
 import ElevationService from './ElevationService.js'
 import PlacesService from './PlacesService.js'
@@ -27,29 +27,34 @@ class OccurrenceService {
         // A list of fields to flag in addition to the non-empty fields
         let errorFields = []
 
-        // Flag records which are obscured or private
-        let isPublic = true
-        if (updatedOccurrence[fieldNames.geoprivacy]) {
+        // Flag a record whose true location was withheld from us. For a new record
+        //  this says why its coordinate fields are empty -- getObservationLocation
+        //  stores no obscured point -- and it is what the geoprivacy email list is
+        //  built from. It is not what keeps a record off a label; hasTrueLocation is.
+        const usingPrivateCoordinates = updatedOccurrence[fieldNames.coordinateSource] === coordinateSources.private
+        if (!usingPrivateCoordinates && updatedOccurrence[fieldNames.geoprivacy]) {
             errorFields.push(fieldNames.geoprivacy)
-            isPublic = false
         }
+        // Taxon geoprivacy flags whether or not we hold the true coordinates, because
+        //  it is not about what we hold: it marks a record whose location must be
+        //  coarsened on its way out to another system, and taxonomists work from it.
         if (updatedOccurrence[fieldNames.taxon_geoprivacy]) {
             errorFields.push(fieldNames.taxon_geoprivacy)
-            isPublic = false
         }
 
         // Flag country and state if they are too long (unabbreviated)
         if (updatedOccurrence[fieldNames.country]?.length > 3) { errorFields.push(fieldNames.country) }
         if (updatedOccurrence[fieldNames.stateProvince]?.length > 2) { errorFields.push(fieldNames.stateProvince) }
 
-        // Flag locality if the observation's precise location is intended to be 
-        //  known and if it has one of the following:
-        //  Has a street/county suffixes; Has illegal characters; Is too long
+        // Flag locality if it has one of the following:
+        //  Has a street/county suffix; Has illegal characters; Is too long
+        // Every stored locality now describes the true location -- a withheld one
+        //  leaves the field empty, which nonEmptyFields already flags -- so there is
+        //  no longer a coarse locality to hold these checks back for.
         if (
-            isPublic &&
-            (includesIllegalSuffix(updatedOccurrence[fieldNames.locality]) 
+            includesIllegalSuffix(updatedOccurrence[fieldNames.locality])
             || /[,"]/.test(updatedOccurrence[fieldNames.locality])
-            || updatedOccurrence[fieldNames.locality]?.length > 18)
+            || updatedOccurrence[fieldNames.locality]?.length > 18
         ) {
             errorFields.push(fieldNames.locality)
         }
@@ -66,6 +71,128 @@ class OccurrenceService {
         updatedOccurrence[fieldNames.errorFlags] = nonEmptyFields.filter((field) => !updatedOccurrence[field]).concat(errorFields).join(';')
 
         return updatedOccurrence
+    }
+
+    /*
+     * getObservationLocation()
+     * Returns the true location fields of an observation, or empty ones where its true
+     *  location was withheld from us
+     */
+    getObservationLocation(observation) {
+        // iNaturalist never substitutes the true coordinates into the public
+        //  fields: for an obscured record, `geojson` is a point shifted by up to
+        //  ~27km and the real one arrives alongside it as `private_geojson`,
+        //  present only when we have been granted access.
+        //
+        // An occurrence holds the true location or none at all. The shifted point
+        //  is not a coarser version of the location, it is a different place, and
+        //  stored it is indistinguishable from a real one -- on a label, in the
+        //  occurrences CSV, and in anything exported onward. So where the true
+        //  point was withheld we record no location, and the empty coordinate
+        //  fields keep the record off labels on their own.
+        const granted = !!observation?.private_geojson
+        const obscured = !!observation?.geoprivacy || !!observation?.taxon_geoprivacy
+
+        if (obscured && !granted) {
+            return { latitude: '', longitude: '', locality: '', placeIds: [], coordinateSource: '' }
+        }
+
+        // Every field comes from the same side as the coordinates. An observation
+        //  can carry a private point and no private place guess, and the public
+        //  guess is then a description of the *other* point -- falling back to it
+        //  would put a locality and a county in the record that do not belong to
+        //  the coordinates beside them. Better to have no locality: an empty one
+        //  is flagged, and a wrong one is not.
+        const geojson = granted ? observation?.private_geojson : observation?.geojson
+        const placeGuess = granted ? observation?.private_place_guess : observation?.place_guess
+        const placeIds = (granted ? observation?.private_place_ids : observation?.place_ids) ?? []
+
+        return {
+            latitude: geojson?.coordinates?.at(1)?.toFixed(4)?.toString() ?? '',
+            longitude: geojson?.coordinates?.at(0)?.toFixed(4)?.toString() ?? '',
+            // parseLocalityFromPlaceGuess turns a missing place guess into bare
+            //  quote characters, which are truthy and would read as a locality
+            locality: placeGuess ? this.parseLocalityFromPlaceGuess(placeGuess) : '',
+            placeIds: placeIds,
+            // Left empty when there are no coordinates at all, so that a record
+            //  we simply have no location for is not labelled as public
+            coordinateSource: geojson
+                ? (granted ? coordinateSources.private : coordinateSources.public)
+                : ''
+        }
+    }
+
+    /*
+     * hasBlockingErrorFlags()
+     * Returns whether an occurrence carries an error flag on any field that a printed label depends on
+     */
+    hasBlockingErrorFlags(occurrence) {
+        const flags = occurrence?.[fieldNames.errorFlags]?.split(';') ?? []
+
+        return requiredFields.some((field) => flags.includes(field))
+    }
+
+    /*
+     * hasTrueLocation()
+     * Returns whether an occurrence's coordinates are known to be the true ones: either
+     *  nothing obscured the record, or we hold the private point
+     */
+    hasTrueLocation(occurrence) {
+        // Decided from provenance, not from whether the coordinate fields are empty.
+        //  New records never store an obscured point, but plenty of stored ones do,
+        //  and nothing guarantees they have been cleared: a refresh only reaches the
+        //  occurrences a task selects, and one saved before coordinateSource existed
+        //  keeps its obscured point even through a refresh. Its coordinates look like
+        //  anyone else's, so only its privacy fields can keep it off a label.
+        const obscured = !!occurrence?.[fieldNames.geoprivacy] || !!occurrence?.[fieldNames.taxon_geoprivacy]
+
+        return !obscured || occurrence?.[fieldNames.coordinateSource] === coordinateSources.private
+    }
+
+    /*
+     * isPrintable()
+     * Returns whether an occurrence can go on a label; getPrintableOccurrences and
+     *  getUnprintableOccurrences both answer through this, so they cannot disagree
+     */
+    isPrintable(occurrence) {
+        return !this.hasBlockingErrorFlags(occurrence) && this.hasTrueLocation(occurrence)
+    }
+
+    /*
+     * hasDefectErrorFlags()
+     * Returns whether an occurrence carries an error flag that reports a fault, as opposed
+     *  to one that only marks the record for whoever handles it later
+     */
+    hasDefectErrorFlags(occurrence) {
+        const flags = occurrence?.[fieldNames.errorFlags]?.split(';')?.filter(Boolean) ?? []
+
+        return flags.some((flag) => !markerFields.includes(flag))
+    }
+
+    /*
+     * noDefectFlagsQuery()
+     * Returns the query fragment matching occurrences that hasDefectErrorFlags would pass:
+     *  every flag they carry, if any, only marks the record rather than faulting it
+     */
+    noDefectFlagsQuery() {
+        // The same question as hasDefectErrorFlags, asked of the database, and built
+        //  from the same list so the two cannot drift. A missing or null errorFlags
+        //  counts as no flags at all.
+        return {
+            $expr: {
+                $eq: [
+                    {
+                        $size: {
+                            $setDifference: [
+                                { $split: [ { $ifNull: [ `$${fieldNames.errorFlags}`, '' ] }, ';' ] },
+                                [ '', ...markerFields ]
+                            ]
+                        }
+                    },
+                    0
+                ]
+            }
+        }
     }
 
     /*
@@ -326,8 +453,11 @@ class OccurrenceService {
         // Look up the plant ancestry and format it
         const plantAncestry = PlantTaxaService.getPlantAncestry(observation.taxon)
 
+        // Read the location, preferring the observation's private coordinates when we have them
+        const location = this.getObservationLocation(observation)
+
         // Parse country, state/province, and county
-        const { country, stateProvince, county } =  PlacesService.getPlaceNames(observation.place_ids)
+        const { country, stateProvince, county } =  PlacesService.getPlaceNames(location.placeIds)
 
         /* Formatted fields as constants */
 
@@ -350,11 +480,11 @@ class OccurrenceService {
         const formattedMonth = !isNaN(observedMonth) ? observedMonth.toString() : ''
         const formattedYear = !isNaN(observedYear) ? observedYear.toString() : ''
         
-        const formattedLocality = this.parseLocalityFromPlaceGuess(observation.place_guess)
+        const formattedLocality = location.locality
 
         // Format the coordinates
-        const formattedLatitude = observation.geojson?.coordinates?.at(1)?.toFixed(4)?.toString() ?? ''
-        const formattedLongitude = observation.geojson?.coordinates?.at(0)?.toFixed(4)?.toString() ?? ''
+        const formattedLatitude = location.latitude
+        const formattedLongitude = location.longitude
 
         /* Final formatting */
 
@@ -395,6 +525,10 @@ class OccurrenceService {
         occurrence[fieldNames.latitude] = formattedLatitude
         occurrence[fieldNames.longitude] = formattedLongitude
         occurrence[fieldNames.accuracy] = observation.positional_accuracy?.toString() ?? ''
+        // Record which coordinate we used. positional_accuracy describes the true
+        //  location even when the public coordinates are obscured, so without this
+        //  an obscured record looks as precise as any other.
+        occurrence[fieldNames.coordinateSource] = location.coordinateSource
 
         occurrence[fieldNames.samplingProtocol] = 'aerial net'
 
@@ -574,11 +708,15 @@ class OccurrenceService {
             scratch = false
         } = options
 
-        // Query occurrences with empty errorFlags and fieldNumber
+        // Query occurrences with no fieldNumber and no error flag reporting a fault.
+        // The marker flags are skipped here rather than everywhere downstream: a
+        // taxon-obscured record is sound, and refusing it a field number would keep
+        // its specimen off labels forever. This is hasDefectErrorFlags in the database.
         const filter = {
             scratch: scratch,
-            [fieldNames.errorFlags]: { $exists: true, $in: [ null, '' ] },
-            [fieldNames.fieldNumber]: { $exists: true, $in: [ null, '' ] }
+            [fieldNames.errorFlags]: { $exists: true },
+            [fieldNames.fieldNumber]: { $exists: true, $in: [ null, '' ] },
+            ...this.noDefectFlagsQuery()
         }
         const sortConfig = [ { field: 'composite_sort', direction: 1, type: 'string' } ]
         return await this.repository.paginate({ ...options, filter, sortConfig })
@@ -586,7 +724,7 @@ class OccurrenceService {
 
     /*
      * getPrintableOccurrences()
-     * Returns occurrences that do not have error flags on the constant list of required fields; optional filtering by a list of userLogins, scratch space, and dateLabelPrint
+     * Returns occurrences that have every required field, no error flag on a field a label depends on, and a location known to be true; optional filtering by a list of userLogins, scratch space, and dateLabelPrint
      */
     async getPrintableOccurrences(options = { userLogins: [], scratch: false, ignoreDateLabelPrint: false }) {
         const {
@@ -613,17 +751,12 @@ class OccurrenceService {
         requiredFields.forEach((field) => filter[field] = { $exists: true, $nin: [ null, '' ] })
         const occurrences = await this.repository.findMany(filter, {}, { [fieldNames.recordedBy]: 1, [fieldNames.fieldNumber]: 1 })
 
-        // Filter out occurrences where any of the required fields show up in errorFlags
-        return occurrences.filter(
-            (occurrence) => !requiredFields.some(
-                (field) => occurrence[fieldNames.errorFlags]?.split(';')?.includes(field) ?? false
-            )
-        )
+        return occurrences.filter((occurrence) => this.isPrintable(occurrence))
     }
 
     /*
      * getUnprintableOccurrences()
-     * Returns occurrences that have error flags on the constant list of required fields; optional filtering by dateLabelPrint
+     * Returns flagged occurrences that cannot go on a label; optional filtering by dateLabelPrint
      */
     async getUnprintableOccurrences(options = { scratch: false, ignoreDateLabelPrint: false }) {
         const {
@@ -632,7 +765,8 @@ class OccurrenceService {
         } = options
 
         // Query occurrences with the given scratch value and a nonempty errorFlags field
-        // If a requiredField is missing, it will show up as a flag in errorFlags
+        // If a requiredField is missing, it will show up as a flag in errorFlags, and
+        //  an occurrence without a true location always carries a privacy flag
         const filter = {
             scratch: scratch,
             [fieldNames.errorFlags]: { $exists: true, $nin: [ null, '' ] }
@@ -646,12 +780,7 @@ class OccurrenceService {
         }
         const occurrences = await this.repository.findMany(filter)
 
-        // Filter all erroneous occurrences down to only those with error flags on the constant list of required fields
-        return occurrences.filter(
-            (occurrence) => requiredFields.some(
-                (field) => occurrence[fieldNames.errorFlags]?.split(';')?.includes(field) ?? false
-            )
-        )
+        return occurrences.filter((occurrence) => !this.isPrintable(occurrence))
     }
 
     /*
@@ -909,27 +1038,67 @@ class OccurrenceService {
         const coordinate = `${occurrence[fieldNames.latitude]},${occurrence[fieldNames.longitude]}`
         updateDocument[fieldNames.elevation] = elevations[coordinate] || ''
 
+        // Runs the same rule as the create path: the true location, or none
+        const newLocation = this.getObservationLocation(observation)
+
+        // Access to an observation's true location moves in both directions: an
+        //  observer can grant trust or withdraw it. Gaining it is what rewrites a
+        //  location -- a record stuck on a worse one takes the better one.
+        //
+        //  Losing it rewrites nothing. A true location we recorded while we were
+        //  entitled to it stays: it is where the specimen in the drawer was
+        //  collected, the label already says so, and deleting it would not unsay
+        //  anything. What the observer's change governs is what we publish, so the
+        //  record keeps its geoprivacy value and is coarsened on the way out to
+        //  another system, exactly as a taxon-obscured record is.
+        const storedSource = occurrence[fieldNames.coordinateSource]
+        // A record holding no coordinates at all takes whatever location becomes
+        //  available. It has nothing to lose and no provenance to respect: either it
+        //  was stored empty because the true point was withheld, or it never had one.
+        const storedHasNoLocation = !occurrence[fieldNames.latitude] && !occurrence[fieldNames.longitude]
+        const accessChanged = !!observation
+            && newLocation.coordinateSource !== storedSource
+            && (!!storedSource || storedHasNoLocation || newLocation.coordinateSource === coordinateSources.private)
+
         // Update the coordinate fields if overwriting
         // Treat an empty accuracy as perfect precision
-        if (overwriteValidLocations) {
-            const newLatitude = observation?.geojson?.coordinates?.at(1)?.toFixed(4)?.toString() || ''
-            const newLongitude = observation?.geojson?.coordinates?.at(0)?.toFixed(4)?.toString() || ''
+        // An observation with no location to offer leaves the stored one alone --
+        //  nothing true is replaced by nothing at all, whichever way access moved
+        if ((overwriteValidLocations || accessChanged) && !!newLocation.coordinateSource) {
+            const newLatitude = newLocation.latitude
+            const newLongitude = newLocation.longitude
             const newCoordinate = `${newLatitude},${newLongitude}`
             const newAccuracy = observation?.positional_accuracy ?? ''
-            const newLocality = this.parseLocalityFromPlaceGuess(observation?.place_guess)
 
-            // Check that either coordinate changed before updating the occurrence fields
-            updateDocument[fieldNames.elevation] = elevations[newCoordinate] 
+            updateDocument[fieldNames.elevation] = elevations[newCoordinate]
                 || await ElevationService.getElevation(newLatitude, newLongitude) || ''
             updateDocument[fieldNames.latitude] = newLatitude
             updateDocument[fieldNames.longitude] = newLongitude
             updateDocument[fieldNames.accuracy] = newAccuracy.toString() || ''
-            updateDocument[fieldNames.locality] = newLocality || occurrence?.locality || ''
+            // A stored locality describes the point it was stored with, so it survives
+            //  only where that point is not moving. Gaining access often moves nothing
+            //  -- a record built while its observation was open already holds the true
+            //  point -- and there the locality is as true as it ever was. Where the
+            //  point does move, an observation offering no place guess leaves the
+            //  locality empty rather than letting the old one name the new place.
+            const coordinatesUnchanged = newLatitude === occurrence?.[fieldNames.latitude]
+                && newLongitude === occurrence?.[fieldNames.longitude]
+            updateDocument[fieldNames.locality] = newLocation.locality
+                || (coordinatesUnchanged ? occurrence?.[fieldNames.locality] : '') || ''
+            updateDocument[fieldNames.coordinateSource] = newLocation.coordinateSource
         }
 
         if (observation) {
             updateDocument[fieldNames.resourceRelationship] = 'visits flowers of'
             updateDocument[fieldNames.relatedResourceId] = observation.uuid
+
+            // Refresh the privacy fields. Geoprivacy is not fixed at the moment we
+            //  first see an observation: an observer can obscure a record long after
+            //  we built an occurrence from it, and iNaturalist can obscure one on its
+            //  own when a taxon's conservation status changes. Re-reading them here
+            //  means the error flags below reflect the observation as it stands today.
+            updateDocument[fieldNames.geoprivacy] = observation.geoprivacy ?? ''
+            updateDocument[fieldNames.taxon_geoprivacy] = observation.taxon_geoprivacy ?? ''
 
             // Look up and update the plant taxonomy
             const plantTaxonomy = PlantTaxaService.getPlantAncestry(observation.taxon)

@@ -29,6 +29,7 @@ const ELEVATION = 'verbatimElevation'
 const LATITUDE = 'decimalLatitude'
 const LONGITUDE = 'decimalLongitude'
 const ACCURACY = 'coordinateUncertaintyInMeters'
+const COORDINATE_SOURCE = 'coordinateSource'
 const SAMPLING_PROTOCOL = 'samplingProtocol'
 const RESOURCE_RELATIONSHIP = 'relationshipOfResource'
 const RESOURCE_ID = 'resourceID'
@@ -61,6 +62,12 @@ const VOL_DET_SEX = 'sexVolDet'
 const VOL_DET_CASTE = 'casteVolDet'
 const GEOPRIVACY = 'geoprivacy'
 const TAXON_GEOPRIVACY = 'taxon_geoprivacy'
+
+// Values for COORDINATE_SOURCE: whether a record's location came from the
+// observation's private (true) coordinates or its public ones, which are
+// deliberately shifted for obscured records
+const COORDINATE_SOURCE_PRIVATE = 'private'
+const COORDINATE_SOURCE_PUBLIC = 'public'
 
 // Observation field names
 const UUID = 'uuid'
@@ -110,6 +117,25 @@ const PLANT_LIST_RECOMMENDED = 'OF_RecommendedPlants'
 const PLANT_LIST_SUPER_BEE = 'SuperBeePlants'
 const PLANT_LIST_URL = 'PlantURL'
 const PLANT_LIST_WEED_URL = 'NoxiousWeedURL'
+
+// Fields that must hold a value, and hold a usable one, before an occurrence can
+// be printed on a label. Both questions are answered by this one list: a missing
+// value is itself reported in errorFlags, alongside a value that fails its checks.
+const LABEL_REQUIRED_FIELDS = [
+    FIELD_NO,
+    FIRST_NAME_INITIAL,
+    LAST_NAME,
+    SAMPLE_ID,
+    DAY,
+    MONTH,
+    YEAR,
+    COUNTRY,
+    STATE_PROVINCE,
+    LOCALITY,
+    LATITUDE,
+    LONGITUDE,
+    SAMPLING_PROTOCOL
+] as const
 
 const constants = {
     // Maximum number of output files stored on the server for each output type
@@ -181,6 +207,7 @@ const constants = {
             latitude: LATITUDE,
             longitude: LONGITUDE,
             accuracy: ACCURACY,
+            coordinateSource: COORDINATE_SOURCE,
             samplingProtocol: SAMPLING_PROTOCOL,
             resourceRelationship: RESOURCE_RELATIONSHIP,
             resourceId: RESOURCE_ID,
@@ -246,6 +273,7 @@ const constants = {
             [LATITUDE]: null,
             [LONGITUDE]: null,
             [ACCURACY]: null,
+            [COORDINATE_SOURCE]: null,
             [SAMPLING_PROTOCOL]: null,
             [RESOURCE_RELATIONSHIP]: null,
             [RESOURCE_ID]: null,
@@ -279,6 +307,11 @@ const constants = {
             [GEOPRIVACY]: '',
             [TAXON_GEOPRIVACY]: ''
         },
+        // Where a record's coordinates came from; see COORDINATE_SOURCE above
+        coordinateSources: {
+            private: COORDINATE_SOURCE_PRIVATE,
+            public: COORDINATE_SOURCE_PUBLIC
+        },
         // A list of fields that should be flagged if empty
         nonEmptyFields: [
             FIRST_NAME,
@@ -296,6 +329,13 @@ const constants = {
             LATITUDE,
             LONGITUDE,
             SAMPLING_PROTOCOL
+        ],
+        // Error flags that describe a record rather than fault it. taxon_geoprivacy is
+        // raised for whoever exports the record onward, not because anything about the
+        // record is wrong, so it must not keep a specimen from being given a field
+        // number -- and an unnumbered specimen can never be labelled.
+        markerFields: [
+            TAXON_GEOPRIVACY
         ],
         // Default sorting hierarchy used by the composite_sort field
         sortConfig: [
@@ -362,21 +402,7 @@ const constants = {
     },
     labels: {
         // List of mandatory fields for a label to be printed
-        requiredFields: [
-            FIELD_NO,
-            FIRST_NAME_INITIAL,
-            LAST_NAME,
-            SAMPLE_ID,
-            DAY,
-            MONTH,
-            YEAR,
-            COUNTRY,
-            STATE_PROVINCE,
-            LOCALITY,
-            LATITUDE,
-            LONGITUDE,
-            SAMPLING_PROTOCOL
-        ]
+        requiredFields: LABEL_REQUIRED_FIELDS
     },
     usernames: {
         // Username field names
@@ -614,7 +640,7 @@ export const { auth } = constants
 export const { tasks } = constants
 export const { subtasks } = constants.tasks
 export const { occurrences } = constants
-export const { template, fieldNames, nonEmptyFields, sortConfig } = constants.occurrences
+export const { template, fieldNames, nonEmptyFields, markerFields, sortConfig, coordinateSources } = constants.occurrences
 export const { observations } = constants
 export const { ofvs, fieldNames: obsFieldNames, template: obsTemplate } = constants.observations
 export const { labels } = constants

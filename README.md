@@ -4,6 +4,9 @@ A full stack web application that fetches bee observation data and creates speci
 ## Stack
 Orchestrated with Docker Compose ([`docker-compose.yml`](docker-compose.yml); dev overrides in [`docker-compose.override.yml`](docker-compose.override.yml)): MongoDB, RabbitMQ, an Express API ([`server/`](server)), an R-based worker ([`worker/`](worker)), an nginx reverse proxy, and a Vite/React client ([`client/`](client)).
 
+## Design notes
+- [Obscured coordinates](docs/obscured-coordinates.md): how observations whose location iNaturalist hides are stored, pulled, kept off labels, and handed to Beeline.
+
 ## Local development
 1. Copy [`.env.example`](.env.example) to `.env` and fill it in (generate the secrets with `openssl rand -hex 32`). The server validates required variables at startup via [`shared/lib/config/environment.js`](shared/lib/config/environment.js).
 2. Start the backend: `docker compose up --build mongo rabbitmq server nginx`. (The full `docker compose up` additionally builds the R worker image — slow on the first run — and a Vite dev server at http://localhost:5173.)
