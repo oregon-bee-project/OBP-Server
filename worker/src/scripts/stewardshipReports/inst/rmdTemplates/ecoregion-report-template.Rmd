@@ -197,7 +197,7 @@ provLogoTeX <- paste0("\\node{\\includegraphics[height=2cm]{../extdata/",provLog
 \begin{tikzpicture}[remember picture,overlay]
     \fill[osuRed] (current page.north west) rectangle ([yshift=0cm] current page text area.north  -| current page.east); 
     \node[anchor=north west,rectangle,,yshift=-0.5cm,xshift=1cm] at (current page.north west){\includegraphics[height=2.5cm]{../extdata/stewardship_report_header.png}};
-    \node[minimum height = 2.3cm,minimum width=8cm,anchor=south west,font=\color{white}\Huge\linespread{1}\selectfont,rectangle,yshift=-5.25cm,xshift=1cm,align=left] at (current page.north west){\textsc{`r gsub('_','-',params$set_title)` 2025}};
+    \node[minimum height = 2.3cm,minimum width=8cm,anchor=south west,font=\color{white}\Huge\linespread{1}\selectfont,rectangle,yshift=-5.25cm,xshift=1cm,align=left] at (current page.north west){\textsc{`r gsub('_','-',params$set_title)`}};
     \node[anchor=north east,rectangle,,yshift=-0.5cm,xshift=-0.5cm] at (current page.north east){\includegraphics[height=4cm]{../extdata/blackwhite_beestewards_logo.png}};
     \matrix[matrix anchor=south west, anchor=base, yshift=0.5cm,xshift=1cm, row sep=0pt, column sep=1cm] at (current page.south west) {
       \node{\includegraphics[height=2cm]{../extdata/OSU_ES-MM_horizontal_2C_O_over_B.png}}; & `r provLogoTeX` \\

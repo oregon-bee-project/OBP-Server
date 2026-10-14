@@ -63,6 +63,19 @@ class TaskService {
     }
 
     /*
+     * hasTasksSince()
+     * Returns whether any task created after a given ISO timestamp has a subtask of a type other than the one given
+     */
+    async hasTasksSince(isoDate, excludeSubtaskType) {
+        const task = await this.repository.findOne({
+            createdAt: { $gt: isoDate },
+            subtasks: { $elemMatch: { type: { $ne: excludeSubtaskType } } }
+        })
+
+        return !!task
+    }
+
+    /*
      * getTaskById()
      * Finds a specific task by its Mongo ID
      */

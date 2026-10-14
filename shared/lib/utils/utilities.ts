@@ -189,6 +189,71 @@ function parseQueryParameters(query: QueryParameters, adminId?: string): ParsedQ
     return params
 }
 
+const DEFAULT_STEWARDSHIP_REPORT_TITLE = 'Stewardship Report'
+const MAX_STEWARDSHIP_REPORT_TITLE_LENGTH = 60
+
+/*
+ * normalizeStewardshipReportUrl()
+ * Converts an iNaturalist project or observations URL into an observations URL limited to plants
+ */
+function normalizeStewardshipReportUrl(rawUrl: unknown): string {
+    if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
+        throw new ValidationError('url required for stewardshipReport subtasks with url input')
+    }
+
+    let url: URL
+    try {
+        url = new URL(rawUrl.trim())
+    } catch {
+        throw new ValidationError('Invalid iNaturalist URL')
+    }
+
+    if (url.hostname !== 'inaturalist.org' && !url.hostname.endsWith('.inaturalist.org')) {
+        throw new ValidationError('URL must be an iNaturalist URL')
+    }
+
+    const params = url.searchParams
+    const projectSlug = url.pathname.match(/^\/projects\/([^/]+)\/?$/)?.[1]
+    if (projectSlug) {
+        // A project page carries its scope in the path, which the API doesn't understand
+        params.set('project_id', projectSlug)
+    } else if (!/^\/observations\/?$/.test(url.pathname)) {
+        throw new ValidationError('URL must be an iNaturalist project or observations URL')
+    }
+
+    // Refuse URLs that would pull observations from the whole world
+    const scoped = ['project_id', 'place_id', 'user_id'].some((param) => params.has(param))
+        || ['nelat', 'nelng', 'swlat', 'swlng'].every((param) => params.has(param))
+        || ['lat', 'lng'].every((param) => params.has(param))
+    if (!scoped) {
+        throw new ValidationError('iNaturalist URL must be limited to a project, place, user, or map area')
+    }
+
+    // Website-only parameters
+    params.delete('tab')
+    params.delete('subview')
+
+    // Stewardship reports only use plant observations
+    params.set('iconic_taxa', 'Plantae')
+
+    return `https://www.inaturalist.org/observations?${params.toString()}`
+}
+
+/*
+ * normalizeStewardshipReportTitle()
+ * Restricts a report title to characters that are safe in a file name and in the report's LaTeX
+ */
+function normalizeStewardshipReportTitle(rawTitle: unknown): string {
+    const title = (typeof rawTitle === 'string' ? rawTitle : '')
+        .replace(/[^a-zA-Z0-9 '.-]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/^[\s.]+/, '')     // A leading '.' would hide the file from the R script
+        .slice(0, MAX_STEWARDSHIP_REPORT_TITLE_LENGTH)
+        .trim()
+
+    return title || DEFAULT_STEWARDSHIP_REPORT_TITLE
+}
+
 /*
  * parseSubtasks()
  * Parses subtasks from a given JSON string, throwing errors if any fields are invalid
@@ -236,6 +301,16 @@ function parseSubtasks(subtasksJSON: string | undefined, adminId?: string): any[
                 // Modify subtasks with the formatted dates
                 subtasks[i].minDate = formattedMinDate
                 subtasks[i].maxDate = formattedMaxDate
+            }
+
+            if (subtask.type === 'stewardshipReport') {
+                if (subtask.input !== 'url' && subtask.input !== 'upload') {
+                    throw new ValidationError("input must be 'url' or 'upload' for stewardshipReport subtasks")
+                }
+
+                subtasks[i].url = subtask.input === 'url' ? normalizeStewardshipReportUrl(subtask.url) : undefined
+                subtasks[i].title = normalizeStewardshipReportTitle(subtask.title)
+                subtasks[i].refreshOccurrences = subtask.refreshOccurrences === true
             }
         }
 
