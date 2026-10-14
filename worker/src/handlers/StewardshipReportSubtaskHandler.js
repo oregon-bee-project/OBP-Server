@@ -59,6 +59,15 @@ export default class StewardshipReportSubtaskHandler extends BaseSubtaskHandler 
     }
 
     /*
+     * #logUnmeasuredStep()
+     * Logs a task step without a progress percentage (logTaskStep otherwise keeps the previous step's percentage)
+     */
+    async #logUnmeasuredStep(taskId, message) {
+        await TaskService.updateProgressPercentageById(taskId, '')
+        await TaskService.logTaskStep(taskId, message)
+    }
+
+    /*
      * #writeObservationsFromUrl()
      * Fetches plant observations from an iNaturalist observations URL and writes them to a CSV file
      */
@@ -205,12 +214,12 @@ export default class StewardshipReportSubtaskHandler extends BaseSubtaskHandler 
 
         // Observations
         if (subtask.input === 'url') {
-            await TaskService.logTaskStep(taskId, 'Pulling plant observations from iNaturalist')
+            await this.#logUnmeasuredStep(taskId, 'Pulling plant observations from iNaturalist')
             const { pulled, skipped } = await this.#writeObservationsFromUrl(taskId, subtask.url, observationsPath)
             if (skipped > 0) {
                 const note = `Skipped ${skipped} of ${pulled} observations that are undated or from before ${minObservationYear}`
                 logNotes.push(note)
-                await TaskService.logTaskStep(taskId, note)
+                await this.#logUnmeasuredStep(taskId, note)
             }
         } else {
             const uploadFilePath = task.upload?.filePath
@@ -222,21 +231,21 @@ export default class StewardshipReportSubtaskHandler extends BaseSubtaskHandler 
         // Occurrences
         const cachedExport = subtask.refreshOccurrences ? null : await this.#getCachedOccurrencesExport()
         if (cachedExport) {
-            await TaskService.logTaskStep(taskId, `Using cached occurrences export (${cachedExport.count} occurrences, exported ${this.#describeAge(cachedExport.exportedAt)})`)
+            await this.#logUnmeasuredStep(taskId, `Using cached occurrences export (${cachedExport.count} occurrences, exported ${this.#describeAge(cachedExport.exportedAt)})`)
         } else {
             await TaskService.logTaskStep(taskId, 'Exporting occurrences from database')
             await this.#exportOccurrences(taskId)
         }
 
         // Execute the stewardship report R script
-        await TaskService.logTaskStep(taskId, 'Creating stewardship report')
+        await this.#logUnmeasuredStep(taskId, 'Creating stewardship report')
         const { success } = await ScriptService.runRScript(
             './src/scripts/stewardshipReports/run.R',
             [ plantListPath, occurrencesPath, inatDirectory, scriptOutputDirectory ],
             { logPath: scriptLogPath, logHeader: logNotes.join('\n') }
         )
 
-        await TaskService.logTaskStep(taskId, 'Writing output files')
+        await this.#logUnmeasuredStep(taskId, 'Writing output files')
 
         // Publish whichever output files exist, so the log is downloadable even when the script fails
         const reportSourcePath = scriptOutputDirectory + 'report.pdf'

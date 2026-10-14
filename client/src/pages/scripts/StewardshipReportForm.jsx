@@ -163,6 +163,11 @@ const StewardshipReportFormContainer = styled.div`
         font-size: 12pt;
     }
 
+    .titleNotice {
+        color: goldenrod;
+        font-weight: bold;
+    }
+
     #submitStewardshipReport {
         align-self: start;
 
@@ -200,6 +205,10 @@ const StewardshipReportFormContainer = styled.div`
 
 const defaultTitle = 'Stewardship Report'
 
+// Mirrors the title rules in parseSubtasks (shared/lib/utils/utilities.ts); characters outside these
+//  would break the report's file name or LaTeX, and a leading '.' would hide the file from the R script
+const disallowedTitleCharacters = /[^a-zA-Z0-9 '.-]/g
+
 // Output files produced by the stewardship report subtask, keyed by output type
 const outputLabels = {
     report: 'report',
@@ -216,6 +225,7 @@ export default function StewardshipReportForm() {
     const [ inputType, setInputType ] = useState('url')
     const [ url, setUrl ] = useState('')
     const [ title, setTitle ] = useState('')
+    const [ titleRejected, setTitleRejected ] = useState(false)
     const [ refreshOccurrences, setRefreshOccurrences ] = useState(false)
 
     /* Queries */
@@ -315,6 +325,18 @@ export default function StewardshipReportForm() {
     }
 
     /*
+     * handleTitleChange()
+     * Updates the title, dropping characters the server would strip out
+     */
+    function handleTitleChange(event) {
+        const enteredTitle = event.target.value.replace(/[‘’]/g, "'")
+        const allowedTitle = enteredTitle.replace(disallowedTitleCharacters, '').replace(/^[\s.]+/, '')
+
+        setTitleRejected(allowedTitle !== enteredTitle)
+        setTitle(allowedTitle)
+    }
+
+    /*
      * handleReset()
      * Resets the form
      */
@@ -399,9 +421,15 @@ export default function StewardshipReportForm() {
                                     placeholder={defaultTitle}
                                     maxLength={60}
                                     value={title}
-                                    onChange={(event) => setTitle(event.target.value)}
+                                    onChange={handleTitleChange}
                                 />
                             </div>
+                            { titleRejected &&
+                                <p>
+                                    <span className='titleNotice'>Notice: </span>
+                                    Titles can only contain letters, numbers, spaces, apostrophes ('), hyphens (-), and periods (.)
+                                </p>
+                            }
                             <div className='subtaskSetting'>
                                 <input
                                     type='checkbox'

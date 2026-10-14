@@ -5,7 +5,7 @@ class ScriptService {
     constructor() {
         // TODO: Move these constants into an .env or config file
         this.defaultTimeout = 300000                // 5 minute timeout
-        this.defaultMaxLogBytes = 1024 * 1024 * 10  // 10 MB log limit
+        this.defaultMaxLogBytes = 1024 * 1024 * 2   // 2 MB log limit (a typical stewardship report log is ~40 KB)
     }
 
     /*

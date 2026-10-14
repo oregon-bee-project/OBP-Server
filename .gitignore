@@ -15,7 +15,9 @@ shared/data/mismatches
 shared/data/pivots
 shared/data/pulls
 shared/data/reports
+shared/data/stewardship
 shared/data/taxonomy
+shared/data/temp
 shared/data/uploads
 shared/data/places.json
 shared/data/plantTaxa.json
