@@ -149,7 +149,7 @@ const constants = {
         maxOccurrences: 25,
         maxPivots: 25,
         maxPulls: 25,
-        maxReports: 25,
+        maxReports: 30,
         maxTaxonomy: 2,
         maxUploads: 25,
         maxMismatches: 25

@@ -171,6 +171,18 @@ describe('parseSubtasks', () => {
             expect(params(url).has('subview')).toBe(false)
         })
 
+        it.each([
+            'https://inaturalist.ca/projects/some-bc-vineyard',
+            'https://www.naturalista.mx/projects/some-bc-vineyard',
+            'https://portugal.inaturalist.org/projects/some-bc-vineyard',
+        ])('accepts the iNaturalist Network partner URL %s', (partnerUrl) => {
+            // Partner sites share iNaturalist's database, so the URL is
+            // rewritten to the same inaturalist.org query
+            const { url } = parseStewardship({ input: 'url', url: partnerUrl })
+            expect(new URL(url).hostname).toBe('www.inaturalist.org')
+            expect(params(url).get('project_id')).toBe('some-bc-vineyard')
+        })
+
         it('always limits observations to plants', () => {
             const { url } = parseStewardship({
                 input: 'url',
@@ -184,6 +196,8 @@ describe('parseSubtasks', () => {
             ['a partial map area', 'https://www.inaturalist.org/observations?nelat=44&nelng=-117'],
             ['a non-iNaturalist host', 'https://example.com/observations?place_id=10'],
             ['a lookalike host', 'https://inaturalist.org.example.com/observations?place_id=10'],
+            ['a lookalike partner host', 'https://inaturalist.ca.example.com/observations?place_id=10'],
+            ['a host ending in a partner domain', 'https://notinaturalist.ca/observations?place_id=10'],
             ['an unsupported page', 'https://www.inaturalist.org/taxa/47126'],
             ['a malformed URL', 'not a url'],
             ['a missing URL', undefined],

@@ -192,9 +192,32 @@ function parseQueryParameters(query: QueryParameters, adminId?: string): ParsedQ
 const DEFAULT_STEWARDSHIP_REPORT_TITLE = 'Stewardship Report'
 const MAX_STEWARDSHIP_REPORT_TITLE_LENGTH = 60
 
+// iNaturalist and its Network partner sites, which share one database, so their project and observations URLs work the
+//  same way (see https://www.inaturalist.org/sites/network). Partners hosted on subdomains of inaturalist.org (e.g.
+//  portugal.inaturalist.org) are covered by its entry
+const INATURALIST_DOMAINS = [
+    'inaturalist.org',
+    'argentinat.org',           // Argentina
+    'biodiversity4all.org',     // Portugal
+    'inaturalist.ala.org.au',   // Australia
+    'inaturalist.ca',           // Canada
+    'inaturalist.laji.fi',      // Finland
+    'inaturalist.lu',           // Luxembourg
+    'inaturalist.mma.gob.cl',   // Chile
+    'inaturalist.nz',           // New Zealand
+    'inaturalist.se',           // Sweden
+    'naturalista.mx',           // Mexico
+    'naturalista.uy'            // Uruguay
+]
+
+function isINaturalistHostname(hostname: string): boolean {
+    return INATURALIST_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))
+}
+
 /*
  * normalizeStewardshipReportUrl()
- * Converts an iNaturalist project or observations URL into an observations URL limited to plants
+ * Converts an iNaturalist (or Network partner site) project or observations URL into an inaturalist.org observations URL
+ *  limited to plants
  */
 function normalizeStewardshipReportUrl(rawUrl: unknown): string {
     if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
@@ -208,7 +231,7 @@ function normalizeStewardshipReportUrl(rawUrl: unknown): string {
         throw new ValidationError('Invalid iNaturalist URL')
     }
 
-    if (url.hostname !== 'inaturalist.org' && !url.hostname.endsWith('.inaturalist.org')) {
+    if (!isINaturalistHostname(url.hostname)) {
         throw new ValidationError('URL must be an iNaturalist URL')
     }
 

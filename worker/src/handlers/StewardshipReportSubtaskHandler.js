@@ -1,4 +1,7 @@
 import fs from 'fs'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import { stringify } from 'csv-stringify'
 
 import BaseSubtaskHandler from './BaseSubtaskHandler.js'
 import { fieldNames, fileLimits, obsFieldNames, obsTemplate } from '../../shared/lib/utils/constants.js'
@@ -35,24 +38,39 @@ const occurrenceColumns = [
     fieldNames.longitude
 ]
 
-// Subtasks that can write occurrence data, which makes the cached occurrences export stale
-//  (download, plantList, and stewardshipReport subtasks only read occurrences)
-const occurrenceWritingSubtasks = [ 'determinations', 'observations', 'occurrences', 'overwrite', 'syncOccurrences', 'upload' ]
-// Subtasks that upsert an input file into scratch space, but with 'selection' input only move existing occurrences
-//  in and out of scratch space and delete some (which changes the count)
-const scratchSpaceSubtasks = [ 'addresses', 'emails', 'labels', 'pivots' ]
-const occurrenceWritingSubtaskQuery = {
-    $or: [
-        { type: { $in: occurrenceWritingSubtasks } },
-        { type: { $in: scratchSpaceSubtasks }, input: { $ne: 'selection' } }
-    ]
-}
+// Subtasks confirmed never to change the exported occurrence data. Any other subtask (including ones added later)
+//  invalidates the cached occurrences export, so only add one here after checking its handler
+export const readOnlySubtasks = [
+    { type: 'download' },
+    { type: 'plantList' },
+    { type: 'stewardshipReport' },
+    // With selection input, these only move occurrences in and out of scratch space (labels also sets the unexported
+    //  dateLabelPrint) and delete some, which changes the count. With file input they upsert the file's values over
+    //  existing occurrences
+    ...[ 'addresses', 'emails', 'labels', 'pivots' ].map((type) => ({ type, input: 'selection' }))
+]
 
 // iNaturalist refuses to page past this many results
 const maxObservations = 10000
 
 // The R script stops if any observation is undated or from before 2010
 const minObservationYear = 2010
+
+// The production server renders reports more slowly than development machines
+const scriptTimeout = 6 * 60 * 1000     // 6 minutes
+
+/*
+ * writeCSVFromRows()
+ * Streams rows from an (async) iterable into a CSV file, formatted like FileManager.writeCSV. Resolves once the file is
+ *  completely written, so it can be read immediately afterwards
+ */
+export async function writeCSVFromRows(filePath, rows, columns) {
+    await pipeline(
+        Readable.from(rows),
+        stringify({ header: true, columns, bom: true }),
+        fs.createWriteStream(filePath)
+    )
+}
 
 export default class StewardshipReportSubtaskHandler extends BaseSubtaskHandler {
     constructor() {
@@ -144,10 +162,10 @@ export default class StewardshipReportSubtaskHandler extends BaseSubtaskHandler 
 
         if (JSON.stringify(metadata.columns) !== JSON.stringify(occurrenceColumns)) return null
 
-        // Occurrences only change through tasks that write them or through direct uploads, which usually change the count.
-        //  Tasks still pending haven't touched the database yet; they are caught by the next report once they run
+        // Occurrences only change through tasks that aren't read-only or through direct uploads, which usually change the
+        //  count. Tasks still pending haven't touched the database yet; they are caught by the next report once they run
         if (await OccurrenceService.count({}) !== metadata.count) return null
-        if (await TaskService.hasStartedTasksSince(metadata.exportedAt, occurrenceWritingSubtaskQuery)) return null
+        if (await TaskService.hasStartedTasksSince(metadata.exportedAt, readOnlySubtasks)) return null
 
         return metadata
     }
@@ -165,26 +183,32 @@ export default class StewardshipReportSubtaskHandler extends BaseSubtaskHandler 
 
         const pageSize = 5000
         const projection = Object.fromEntries(occurrenceColumns.map((column) => [column, 1]))
-        const rows = []
+        let count = 0
+
+        // Pages are written as they arrive, so only one page of occurrences is in memory at a time
+        async function* occurrencePages() {
+            for (let page = 1; ; page++) {
+                // Sorting by _id alone is much cheaper than the default sort, and the R script doesn't need an order
+                const results = await OccurrenceService.getOccurrencesPage({ page, pageSize, filter: {}, projection, sortConfig: [] })
+                count += results.data.length
+                yield* results.data
+
+                const totalPages = Math.max(results.pagination.totalPages, page)
+                await updateProgress(Math.min(100, 100 * page / totalPages))
+
+                if (results.data.length < pageSize) break
+            }
+        }
 
         await updateProgress(0)
-        for (let page = 1; ; page++) {
-            // Sorting by _id alone is much cheaper than the default sort, and the R script doesn't need an order
-            const results = await OccurrenceService.getOccurrencesPage({ page, pageSize, filter: {}, projection, sortConfig: [] })
-            rows.push(...results.data)
-
-            const totalPages = Math.max(results.pagination.totalPages, page)
-            await updateProgress(Math.min(100, 100 * page / totalPages))
-
-            if (results.data.length < pageSize) break
+        try {
+            await writeCSVFromRows(occurrencesPath, occurrencePages(), occurrenceColumns)
+        } catch (error) {
+            throw new Error(`Failed to write occurrences export: ${error.message}`)
         }
+        FileManager.writeJSON(occurrencesMetadataPath, { exportedAt, count, columns: occurrenceColumns })
 
-        if (!FileManager.writeCSV(occurrencesPath, rows, occurrenceColumns)) {
-            throw new Error('Failed to write occurrences export')
-        }
-        FileManager.writeJSON(occurrencesMetadataPath, { exportedAt, count: rows.length, columns: occurrenceColumns })
-
-        return rows.length
+        return count
     }
 
     /*
@@ -256,7 +280,7 @@ export default class StewardshipReportSubtaskHandler extends BaseSubtaskHandler 
         const { success } = await ScriptService.runRScript(
             './src/scripts/stewardshipReports/run.R',
             [ plantListPath, occurrencesPath, inatDirectory, scriptOutputDirectory ],
-            { logPath: scriptLogPath, logHeader: logNotes.join('\n') }
+            { logPath: scriptLogPath, logHeader: logNotes.join('\n'), timeout: scriptTimeout }
         )
 
         await this.#logUnmeasuredStep(taskId, 'Writing output files')

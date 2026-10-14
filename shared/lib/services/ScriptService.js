@@ -17,14 +17,26 @@ class ScriptService {
         const { logPath, logHeader, timeout = this.defaultTimeout, maxLogBytes = this.defaultMaxLogBytes } = options
 
         return new Promise((resolve) => {
-            const log = logPath ? fs.createWriteStream(logPath) : null
-            if (logHeader) log?.write(`${logHeader}\n\n`)
             let loggedBytes = 0
             let truncated = false
+            let logFailed = false
             let settled = false
+            let success = false
+
+            const done = () => resolve(logPath ? { success, logPath } : { success })
+
+            // A log that can't be written (e.g. a full disk) shouldn't crash the worker or fail the script, so the
+            //  script keeps running without it
+            const log = logPath ? fs.createWriteStream(logPath) : null
+            log?.on('error', (error) => {
+                console.error(`Failed to write script log '${logPath}':`, error)
+                logFailed = true
+                if (settled) done()     // The error may arrive while the log is being closed
+            })
+            if (logHeader) log?.write(`${logHeader}\n\n`)
 
             const writeLog = (chunk) => {
-                if (!log || truncated) return
+                if (!log || truncated || logFailed) return
 
                 const remainingBytes = maxLogBytes - loggedBytes
                 if (chunk.length > remainingBytes) {
@@ -40,19 +52,18 @@ class ScriptService {
             let timedOut = false
             let timer = null
 
-            const finish = (success, note) => {
+            const finish = (succeeded, note) => {
                 if (settled) return
                 settled = true
+                success = succeeded
                 clearTimeout(timer)
 
-                if (note) {
-                    console.error(`Script '${scriptPath}': ${note}`)
-                    log?.write(`\n${note}\n`)
-                }
-                if (log) {
-                    log.end(() => resolve({ success, logPath }))
+                if (note) console.error(`Script '${scriptPath}': ${note}`)
+                if (log && !logFailed) {
+                    if (note) log.write(`\n${note}\n`)
+                    log.end(done)
                 } else {
-                    resolve({ success })
+                    done()
                 }
             }
 
