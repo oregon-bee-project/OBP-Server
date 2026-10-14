@@ -35,6 +35,19 @@ const occurrenceColumns = [
     fieldNames.longitude
 ]
 
+// Subtasks that can write occurrence data, which makes the cached occurrences export stale
+//  (download, plantList, and stewardshipReport subtasks only read occurrences)
+const occurrenceWritingSubtasks = [ 'determinations', 'observations', 'occurrences', 'overwrite', 'syncOccurrences', 'upload' ]
+// Subtasks that upsert an input file into scratch space, but with 'selection' input only move existing occurrences
+//  in and out of scratch space and delete some (which changes the count)
+const scratchSpaceSubtasks = [ 'addresses', 'emails', 'labels', 'pivots' ]
+const occurrenceWritingSubtaskQuery = {
+    $or: [
+        { type: { $in: occurrenceWritingSubtasks } },
+        { type: { $in: scratchSpaceSubtasks }, input: { $ne: 'selection' } }
+    ]
+}
+
 // iNaturalist refuses to page past this many results
 const maxObservations = 10000
 
@@ -131,9 +144,10 @@ export default class StewardshipReportSubtaskHandler extends BaseSubtaskHandler 
 
         if (JSON.stringify(metadata.columns) !== JSON.stringify(occurrenceColumns)) return null
 
-        // Occurrences only change through tasks (other than this one) or direct uploads, which usually change the count
+        // Occurrences only change through tasks that write them or through direct uploads, which usually change the count.
+        //  Tasks still pending haven't touched the database yet; they are caught by the next report once they run
         if (await OccurrenceService.count({}) !== metadata.count) return null
-        if (await TaskService.hasTasksSince(metadata.exportedAt, 'stewardshipReport')) return null
+        if (await TaskService.hasStartedTasksSince(metadata.exportedAt, occurrenceWritingSubtaskQuery)) return null
 
         return metadata
     }

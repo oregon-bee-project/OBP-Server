@@ -63,13 +63,15 @@ class TaskService {
     }
 
     /*
-     * hasTasksSince()
-     * Returns whether any task created after a given ISO timestamp has a subtask of a type other than the one given
+     * hasStartedTasksSince()
+     * Returns whether any task created after a given ISO timestamp has started (is no longer pending) and has a
+     *  subtask matching the given query (a MongoDB $elemMatch condition on subtasks)
      */
-    async hasTasksSince(isoDate, excludeSubtaskType) {
+    async hasStartedTasksSince(isoDate, subtaskQuery) {
         const task = await this.repository.findOne({
             createdAt: { $gt: isoDate },
-            subtasks: { $elemMatch: { type: { $ne: excludeSubtaskType } } }
+            status: { $ne: 'Pending' },
+            subtasks: { $elemMatch: subtaskQuery }
         })
 
         return !!task
