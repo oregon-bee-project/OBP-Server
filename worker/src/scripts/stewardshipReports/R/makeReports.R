@@ -6,7 +6,7 @@
 #' @param beeDataColumns _Required_ - named character vector with column names from _beeDataCSV_ to use.
 #' @param iNatFolder _Required_ - Folder/subfolders containing vineyard iNaturalist CSV files.
 #' @param reportFolder _Required_ - Folder for writing reports to.
-#' @param plDatCSV (Optional) output csv of all vineyard records. Skips writing if NA.
+#' @param vinePlDatCSV (Optional) output csv of all vineyard records. Skips writing if NA.
 #' @param predictedBeesCSV (Optional) output csv of predicted bees for each vineyard. Skips writing if NA.
 #' @param dataStoragePath (Optional) .Rdata storage path for internal function data. Skips writing if NA.
 #' @param famGenPath (Optional) Path to bee genus-family lookup csv. If NA uses lookup table from Pizkulich et al 2023 (DOI: 10.5061/dryad.80gb5mkw1).
@@ -14,7 +14,7 @@
 #' @param orEcoregShpPath (Optional) Path to Oregon ecoregion polygons. Uses internal if NA.
 #' @param beeAbstractsPath (Optional) Path to bee/plant Abstract csv.
 #' 
-#' @return Nothing - writes to plDatCSV, predictedBeesCSV, or dataStoragePath
+#' @return Nothing - writes to vinePlDatCSV, predictedBeesCSV, or dataStoragePath
 #' @export
 #' 
 #' @details 
@@ -36,14 +36,14 @@
 #'   beeDataColumns = bNames, 
 #'   iNatFolder =  './iNat records',
 #'   reportFolder = './reports',
-#'   plDatCSV = NA, predictedBeesCSV = NA, dataStoragePath = NA)
+#'   vinePlDatCSV = NA, predictedBeesCSV = NA, dataStoragePath = NA)
 #' 
 makeReports <- function(plantListCSV = NA, 
                         beeDataCSV = NA, 
                         beeDataColumns = NA,
                         iNatFolder = NA,
                         reportFolder = NA,
-                        plDatCSV = NA,
+                        vinePlDatCSV = NA,
                         predictedBeesCSV = NA,
                         dataStoragePath = NA,
                         famGenPath = NA,
@@ -443,12 +443,12 @@ makeReports <- function(plantListCSV = NA,
     vyNames <- unique(vinePlDat$vineyard) #Rewrites vineyard names if some are missing
   }
   
-  if(!is.na(plDatCSV)){ #If path provided
+  if(!is.na(vinePlDatCSV)){ #If path provided
     #Write all iNat records to single csv
     vinePlDat %>% st_transform(4269) %>% 
       mutate(lat=st_coordinates(.)[,2],lon=st_coordinates(.)[,1]) %>% 
       st_drop_geometry() %>% 
-      write.csv(.,file = plDatCSV,row.names = FALSE)
+      write.csv(.,file = vinePlDatCSV,row.names = FALSE)
   }
   
   # Make regional and vineyard-level networks ------------------------------------

@@ -264,13 +264,13 @@ function normalizeStewardshipReportUrl(rawUrl: unknown): string {
 
 /*
  * normalizeStewardshipReportTitle()
- * Restricts a report title to characters that are safe in a file name and in the report's LaTeX
+ * Restricts a report title to characters that are safe in the report's LaTeX
  */
 function normalizeStewardshipReportTitle(rawTitle: unknown): string {
     const title = (typeof rawTitle === 'string' ? rawTitle : '')
         .replace(/[^a-zA-Z0-9 '.-]/g, '')
         .replace(/\s+/g, ' ')
-        .replace(/^[\s.]+/, '')     // A leading '.' would hide the file from the R script
+        .replace(/^[\s.]+/, '')
         .slice(0, MAX_STEWARDSHIP_REPORT_TITLE_LENGTH)
         .trim()
 

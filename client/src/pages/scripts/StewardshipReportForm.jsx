@@ -206,7 +206,7 @@ const StewardshipReportFormContainer = styled.div`
 const defaultTitle = 'Stewardship Report'
 
 // Mirrors the title rules in parseSubtasks (shared/lib/utils/utilities.ts); characters outside these
-//  would break the report's file name or LaTeX, and a leading '.' would hide the file from the R script
+//  would break the report's LaTeX
 const disallowedTitleCharacters = /[^a-zA-Z0-9 '.-]/g
 
 // Output files produced by the stewardship report subtask, keyed by output type

@@ -237,9 +237,9 @@ export default class StewardshipReportSubtaskHandler extends BaseSubtaskHandler 
         const task = await TaskService.getTaskById(taskId)
         const subtask = task.subtasks.find((subtask) => subtask.type === 'stewardshipReport')
 
-        // The report's title comes from the observations file name
+        // The title is passed to the R script separately, so it never ends up in a file path
         const title = subtask.title || 'Stewardship Report'
-        const observationsPath = inatDirectory + `${title}.csv`
+        const observationsPath = inatDirectory + 'observations.csv'
 
         // Start from an empty temp directory (FileManager.clearDirectory can't remove subdirectories)
         fs.rmSync(tempDirectory, { recursive: true, force: true })
@@ -279,7 +279,7 @@ export default class StewardshipReportSubtaskHandler extends BaseSubtaskHandler 
         await this.#logUnmeasuredStep(taskId, 'Creating stewardship report')
         const { success } = await ScriptService.runRScript(
             './src/scripts/stewardshipReports/run.R',
-            [ plantListPath, occurrencesPath, inatDirectory, scriptOutputDirectory ],
+            [ plantListPath, occurrencesPath, inatDirectory, scriptOutputDirectory, title ],
             { logPath: scriptLogPath, logHeader: logNotes.join('\n'), timeout: scriptTimeout }
         )
 
