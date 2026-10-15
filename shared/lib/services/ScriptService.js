@@ -1,30 +1,108 @@
-import { exec } from 'node:child_process'
-import { promisify } from 'node:util'
+import { spawn } from 'node:child_process'
+import fs from 'node:fs'
 
 class ScriptService {
     constructor() {
-        this.execPromise = promisify(exec)
+        // TODO: Move these constants into an .env or config file
+        this.defaultTimeout = 300000                // 5 minute timeout
+        this.defaultMaxLogBytes = 1024 * 1024 * 2   // 2 MB log limit (a typical stewardship report log is ~40 KB)
     }
 
-    async runScript(cmd, scriptPath, args) {
-        const command = `${cmd} "${scriptPath}"${args ? ' ' + args.join(' ') : ''}`
+    /*
+     * runScript()
+     * Runs a script, streaming its stdout and stderr (interleaved, as they arrive) into an optional log file
+     * that starts with an optional header. Output past maxLogBytes is discarded, but the script keeps running.
+     */
+    runScript(cmd, scriptPath, args = [], options = {}) {
+        const { logPath, logHeader, timeout = this.defaultTimeout, maxLogBytes = this.defaultMaxLogBytes } = options
 
-        try {
-            const { stdout, stderr } = await this.execPromise(command, {
-                maxBuffer: 1024 * 1024 * 10,    // 10 MB buffer limit
-                timeout: 300000                 // 5 minute timeout
+        return new Promise((resolve) => {
+            let loggedBytes = 0
+            let truncated = false
+            let logFailed = false
+            let settled = false
+            let success = false
+
+            const done = () => resolve(logPath ? { success, logPath } : { success })
+
+            // A log that can't be written (e.g. a full disk) shouldn't crash the worker or fail the script, so the
+            //  script keeps running without it
+            const log = logPath ? fs.createWriteStream(logPath) : null
+            log?.on('error', (error) => {
+                console.error(`Failed to write script log '${logPath}':`, error)
+                logFailed = true
+                if (settled) done()     // The error may arrive while the log is being closed
+            })
+            if (logHeader) log?.write(`${logHeader}\n\n`)
+
+            const writeLog = (chunk) => {
+                if (!log || truncated || logFailed) return
+
+                const remainingBytes = maxLogBytes - loggedBytes
+                if (chunk.length > remainingBytes) {
+                    log.write(chunk.subarray(0, remainingBytes))
+                    log.write(`\n[Log truncated at ${maxLogBytes / (1024 * 1024)} MB; further output discarded]\n`)
+                    truncated = true
+                } else {
+                    log.write(chunk)
+                }
+                loggedBytes += chunk.length
+            }
+
+            let timedOut = false
+            let timer = null
+
+            const finish = (succeeded, note) => {
+                if (settled) return
+                settled = true
+                success = succeeded
+                clearTimeout(timer)
+
+                if (note) console.error(`Script '${scriptPath}': ${note}`)
+                if (log && !logFailed) {
+                    if (note) log.write(`\n${note}\n`)
+                    log.end(done)
+                } else {
+                    done()
+                }
+            }
+
+            // Arguments are passed directly (no shell), so they need no quoting. The script runs in its own
+            //  process group so a timeout also stops anything it started (e.g. pandoc and LaTeX for R reports),
+            //  and gets no stdin so nothing it starts can wait on input
+            const child = spawn(cmd, [scriptPath, ...args], { detached: true, stdio: [ 'ignore', 'pipe', 'pipe' ] })
+
+            timer = setTimeout(() => {
+                timedOut = true
+                try {
+                    process.kill(-child.pid, 'SIGKILL')
+                } catch (error) {
+                    console.error('Failed to stop timed out script:', error)
+                }
+            }, timeout)
+
+            // Both streams are always drained, even once the log is full, so the script never blocks on output
+            child.stdout.on('data', writeLog)
+            child.stderr.on('data', writeLog)
+
+            child.on('error', (error) => {
+                finish(false, `Script failed to start: ${error.message}`)
             })
 
-            return { success: true, stdout, stderr }
-        } catch (error) {
-            console.error('Script failed:', error)
-            
-            return { success: false }
-        }
+            child.on('close', (code) => {
+                if (timedOut) {
+                    finish(false, `Script stopped after reaching the ${timeout / 1000} second time limit`)
+                } else if (code === 0) {
+                    finish(true)
+                } else {
+                    finish(false, `Script exited with code ${code}`)
+                }
+            })
+        })
     }
 
-    async runRScript(scriptPath, args) {
-        return await this.runScript('Rscript', scriptPath, args)
+    async runRScript(scriptPath, args, options) {
+        return await this.runScript('Rscript', scriptPath, args, options)
     }
 }
 

@@ -63,6 +63,22 @@ class TaskService {
     }
 
     /*
+     * hasStartedTasksSince()
+     * Returns whether any task created after a given ISO timestamp has started (is no longer pending) and has a
+     *  subtask matching none of the given subtask conditions (e.g. [ { type: 'download' }, { type: 'labels', input: 'selection' } ])
+     */
+    async hasStartedTasksSince(isoDate, excludedSubtasks = []) {
+        const task = await this.repository.findOne({
+            createdAt: { $gt: isoDate },
+            status: { $ne: 'Pending' },
+            // $nor can't be empty, and with nothing excluded any subtask counts
+            subtasks: { $elemMatch: excludedSubtasks.length > 0 ? { $nor: excludedSubtasks } : { type: { $exists: true } } }
+        })
+
+        return !!task
+    }
+
+    /*
      * getTaskById()
      * Finds a specific task by its Mongo ID
      */

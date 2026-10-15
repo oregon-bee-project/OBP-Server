@@ -1,0 +1,4 @@
+vineyard-report-template.Rmd
+*.pdf
+*.log
+*.knit.md

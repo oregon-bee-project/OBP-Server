@@ -1,0 +1,30 @@
+Package: vineyardReportsOSU
+Title: Create Bee-Friendly Vineyard Reports
+Version: 0.0.0.9000
+Authors@R: 
+    person("Samuel", "Robinson", , "s_robinson@ducks.ca", role = c("aut", "cre"))
+Description: This package takes bee and plant records as input, and creates reports for growers with predicted bee biodiversity and suggested future bee-friendly plant information
+License: `use_gpl3_license()`
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports: 
+    basemaps,
+	beepr,
+    bipartite,
+    bookdown,
+    dplyr,
+    ggplot2,
+    ggpubr,
+    ggrepel,
+    kableExtra,
+    knitr,
+    rlang,
+    rmarkdown,
+    sf,
+    stars,
+    stringr,
+    tibble,
+    tidyr,
+    tinytex,
+    vegan

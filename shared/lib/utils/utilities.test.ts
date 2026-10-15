@@ -142,6 +142,97 @@ describe('parseSubtasks', () => {
         expect(subtask.minDate).toBe('2026-06-01')
         expect(subtask.maxDate).toBe('2026-06-30')
     })
+
+    describe('stewardshipReport subtasks', () => {
+        const parseStewardship = (fields: Record<string, unknown>) =>
+            parseSubtasks(JSON.stringify([{ type: 'stewardshipReport', ...fields }]), 'admin')[0]
+
+        const params = (url: string) => new URL(url).searchParams
+
+        it('converts a project page into a plant observations query', () => {
+            const { url } = parseStewardship({
+                input: 'url',
+                url: 'https://www.inaturalist.org/projects/stoller-vineyard-and-winery?tab=observations',
+            })
+            expect(new URL(url).pathname).toBe('/observations')
+            expect(params(url).get('project_id')).toBe('stoller-vineyard-and-winery')
+            expect(params(url).get('iconic_taxa')).toBe('Plantae')
+            expect(params(url).has('tab')).toBe(false)
+        })
+
+        it('keeps the bounds of a map-area observations URL', () => {
+            const { url } = parseStewardship({
+                input: 'url',
+                url: 'https://www.inaturalist.org/observations?nelat=44.245116635&nelng=-117.668568335&subview=map&swlat=44.180507552&swlng=-117.785828195',
+            })
+            expect(params(url).get('nelat')).toBe('44.245116635')
+            expect(params(url).get('swlng')).toBe('-117.785828195')
+            expect(params(url).get('iconic_taxa')).toBe('Plantae')
+            expect(params(url).has('subview')).toBe(false)
+        })
+
+        it.each([
+            'https://inaturalist.ca/projects/some-bc-vineyard',
+            'https://www.naturalista.mx/projects/some-bc-vineyard',
+            'https://portugal.inaturalist.org/projects/some-bc-vineyard',
+        ])('accepts the iNaturalist Network partner URL %s', (partnerUrl) => {
+            // Partner sites share iNaturalist's database, so the URL is
+            // rewritten to the same inaturalist.org query
+            const { url } = parseStewardship({ input: 'url', url: partnerUrl })
+            expect(new URL(url).hostname).toBe('www.inaturalist.org')
+            expect(params(url).get('project_id')).toBe('some-bc-vineyard')
+        })
+
+        it('always limits observations to plants', () => {
+            const { url } = parseStewardship({
+                input: 'url',
+                url: 'https://www.inaturalist.org/observations?place_id=10&iconic_taxa=Insecta',
+            })
+            expect(params(url).getAll('iconic_taxa')).toEqual(['Plantae'])
+        })
+
+        it.each([
+            ['an unscoped URL', 'https://www.inaturalist.org/observations?iconic_taxa=Plantae'],
+            ['a partial map area', 'https://www.inaturalist.org/observations?nelat=44&nelng=-117'],
+            ['a non-iNaturalist host', 'https://example.com/observations?place_id=10'],
+            ['a lookalike host', 'https://inaturalist.org.example.com/observations?place_id=10'],
+            ['a lookalike partner host', 'https://inaturalist.ca.example.com/observations?place_id=10'],
+            ['a host ending in a partner domain', 'https://notinaturalist.ca/observations?place_id=10'],
+            ['an unsupported page', 'https://www.inaturalist.org/taxa/47126'],
+            ['a malformed URL', 'not a url'],
+            ['a missing URL', undefined],
+        ])('rejects %s', (_, url) => {
+            expect(() => parseStewardship({ input: 'url', url })).toThrow(ValidationError)
+        })
+
+        it('rejects an unknown input type', () => {
+            expect(() => parseStewardship({ input: 'selection' })).toThrow(ValidationError)
+        })
+
+        it('ignores the URL for uploads', () => {
+            const subtask = parseStewardship({ input: 'upload', url: 'https://www.inaturalist.org/observations' })
+            expect(subtask.url).toBeUndefined()
+        })
+
+        it.each([
+            [undefined, 'Stewardship Report'],
+            ['   ', 'Stewardship Report'],
+            ['Stoller Vineyard', 'Stoller Vineyard'],
+            ["  O'Brien   Farm  ", "O'Brien Farm"],
+            ['Fields & Meadows #2 / 100%', 'Fields Meadows 2 100'],
+            ['..hidden', 'hidden'],
+            ['&%$', 'Stewardship Report'],
+            ['a'.repeat(80), 'a'.repeat(60)],
+        ])('normalizes the title %j to %j', (title, expected) => {
+            expect(parseStewardship({ input: 'upload', title }).title).toBe(expected)
+        })
+
+        it('only refreshes occurrences when explicitly requested', () => {
+            expect(parseStewardship({ input: 'upload', refreshOccurrences: true }).refreshOccurrences).toBe(true)
+            expect(parseStewardship({ input: 'upload', refreshOccurrences: 'true' }).refreshOccurrences).toBe(false)
+            expect(parseStewardship({ input: 'upload' }).refreshOccurrences).toBe(false)
+        })
+    })
 })
 
 describe('encryptObject / decryptObject', () => {
