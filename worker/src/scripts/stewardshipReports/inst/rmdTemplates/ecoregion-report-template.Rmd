@@ -33,6 +33,7 @@ header-includes:
   - \usepackage[T1]{fontenc}
   
 params:
+  iNatProj: "NULL"
   set_title: "NULL"
 geometry: margin=2cm
 title: ""
@@ -73,10 +74,10 @@ if(any(sapply(params,function(x) x=='NULL'))){
 #Load vineyard plant data from iNaturalist records
 
 #Plants from focal project
-iNatPlDat_vy <- filter(iNatPlDat, vineyard==params$set_title)
+iNatPlDat_vy <- filter(iNatPlDat, vineyard==params$iNatProj)
 
 # #Debugging: param is a reserved word in this context
-# iNatPlDat_vy <- filter(iNatPlDat, vineyard=='liz-shen')
+# iNatPlDat_vy <- filter(iNatPlDat, vineyard=='dominion_park_bee_plant_inventory')
 
 if(length(unique(iNatPlDat_vy$ecoreg))!=1){
   stop(paste0('Project has ',length(unique(iNatPlDat_vy$ecoreg)),' ecoregions; should be 1'))
@@ -93,7 +94,8 @@ inatPlDat_year <- iNatPlDat_vy %>% st_drop_geometry() %>%
               values_fill = 0,values_fn = ~.x==1)
 
 #Bee data from focal ecoregion
-beeData_ecoreg <- beeData %>% filter(ecoreg==ecoRegName) %>% 
+beeData_ecoreg <- beeData %>% 
+  filter(ecoreg==ecoRegName) %>% 
   st_drop_geometry() %>% 
   select(-CollectorName,-Sex,-Method,-ecoreg)
 
@@ -107,7 +109,7 @@ plantScoresSpp <- getPlGenScores(mat = ecoRegNetworks[[ecoRegName]]$ntwk_all, #R
   left_join(plantList,by=c('PlantGenus'='Scientific_name')) %>%
   filter(isNative) %>% 
   filter(!is.na(Common_name)) %>% #Removes genSpp not found in plant list - mostly errors from the recorded plants in the bee data, I think
-  mutate(newBeeFam=sapply(strsplit(newSpp,split = ', '),function(x){ #Which families are most benefitted?
+  mutate(newBeeFam=sapply(strsplit(newSpp,split = ', '),function(x){ #Which families are most benefited?
     paste0(unique(famGen$lookupFam[famGen$Genus %in% gsub(' .*$','',x)]),collapse=', ')
     }))
 
@@ -165,6 +167,12 @@ beeDivRange <- sapply(iNatNetworks,function(x,y) ifelse(x$ecoregNtwk_summary$eco
        y=ecoRegName)
 beeDivRange <- unique(unname(beeDivRange[!is.na(beeDivRange)])) 
 
+#Common names for bee families
+commonFam <- data.frame(Family=factor(c('Andrenidae','Apidae','Colletidae','Halictidae','Megachilidae')),
+                        common=c('Mining bees','Bumble bees and Allies','Polyester bees','Sweat bees','Leaf-cutting bees')) %>%
+  mutate(plotLab=paste0(Family,'\n(',common,')'))
+
+
 ```
 
 \newgeometry{margin=2cm,top=2in}
@@ -172,46 +180,52 @@ beeDivRange <- unique(unname(beeDivRange[!is.na(beeDivRange)]))
 <!-- Create overlay for beginning of document-->
 
 ```{r getLogos}
-provNms <- strsplit(ecoRegNetworks[[ecoRegName]]$ProvStateName,',')[[1]] #Get province/state names
-# provNms <- provNms[provNms!="Oregon"] #Remove Oregon
-provLogoPaths <- list.files(system.file('extdata',package='vineyardReportsOSU',mustWork = TRUE),
-                            pattern=".*BeeAtlas-Logo.png$",full.names = FALSE) #Get paths to logos
-provLogoPaths <- provLogoPaths[grepl(paste0("(",paste0(provNms,collapse = '|'),")"),provLogoPaths)] #Filter paths
-provLogoTeX <- paste0("\\node{\\includegraphics[height=2cm]{../extdata/",provLogoPaths,"}};",collapse=' & ') #LaTex code to render logos as part of a tikzpicture matrix
+provNms <- strsplit(ecoRegNetworks[[ecoRegName]]$ProvStateName,',')[[1]] #Province/state names
+if(!length(provNms)>0) stop('No provinces/state overlaps found in ecoregion labels.')
+provFound <- sapply(provNms,function(x){ #Checks whether province/state is found in logo files
+  any(paste0(x,"-BeeAtlas-Logo.png") %in% dir(system.file('extdata',package='vineyardReportsOSU',mustWork = TRUE)))
+})
+if(any(!provFound)){
+  message(paste0("Project ",params$iNatProj," is found in the ",ecoRegName," ecoregion (overlaps ",paste0(provNms,collapse=", "),"), but no Bee Atlas logo exists for: ",paste0(provNms[!provFound],collapse=','),'\nSkipping logos.'))
+  provNms <- provNms[provFound]
+}
 
-##Example LaTeX code --->
-    # \matrix[matrix anchor=south west, anchor=base, yshift=0.5cm,xshift=1cm, row sep=0pt, column sep=1cm] at (current page.south west) {
-    #   \node{\includegraphics[height=2cm]{../extdata/OSU_ES-MM_horizontal_2C_O_over_B.png}}; &
-    #   \node{\includegraphics[height=2cm]{../extdata/Oregon-BeeAtlas-Logo.png}}; &
-    #   \node{\includegraphics[height=2cm]{../extdata/Washington-BeeAtlas-Logo.png}}; \\ 
-    # };
+provLogoPaths <- unname(sapply(unique(c('Oregon',provNms)),function(nm){ #For Oregon + each province/state name
+  list.files(system.file('extdata',package='vineyardReportsOSU',mustWork = TRUE),
+                            pattern=paste0(nm,"-BeeAtlas-Logo.png"),full.names = FALSE) #Get path to logos
+}))
+provLogoTeX <- paste0("\\node{\\includegraphics[height=2cm]{../extdata/",provLogoPaths,"}};",collapse=' & ') #LaTex code to render logos as part of a tikzpicture matrix
 ```
 
 <!-- Draws overlay for title page in the following order: -->
 <!-- \fill[osuRed] ... = Red rectangle at the top -->
+<!-- Coordinates... -->
 <!-- \node = Report header ("Stewardship report" text) -->
-<!-- \node = Text: Stewardship report -->
 <!-- \node = Bee stewards logo -->
 <!-- \matrix = Grid of University and provincial logos at the bottom of the page, assembled in R chunk above -->
 
 \begin{tikzpicture}[remember picture,overlay]
     \fill[osuRed] (current page.north west) rectangle ([yshift=0cm] current page text area.north  -| current page.east); 
-    \node[anchor=north west,rectangle,,yshift=-0.5cm,xshift=1cm] at (current page.north west){\includegraphics[height=2.5cm]{../extdata/stewardship_report_header.png}};
-    \node[minimum height = 2.3cm,minimum width=8cm,anchor=south west,font=\color{white}\Huge\linespread{1}\selectfont,rectangle,yshift=-5.25cm,xshift=1cm,align=left] at (current page.north west){\textsc{`r gsub('_','-',params$set_title)`}};
-    \node[anchor=north east,rectangle,,yshift=-0.5cm,xshift=-0.5cm] at (current page.north east){\includegraphics[height=4cm]{../extdata/blackwhite_beestewards_logo.png}};
-    \matrix[matrix anchor=south west, anchor=base, yshift=0.5cm,xshift=1cm, row sep=0pt, column sep=1cm] at (current page.south west) {
-      \node{\includegraphics[height=2cm]{../extdata/OSU_ES-MM_horizontal_2C_O_over_B.png}}; & `r provLogoTeX` \\
+    \coordinate (bannerleft) at ($(current page.north west)!0.5!(current page text area.north)$); 
+    \coordinate (bannerright) at ($(current page.north west -| current page.east)!0.5! (current page text area.north -| current page.east)$);
+    \node[anchor=center] at ($(bannerleft)!0.1!(bannerright)$){\includegraphics[height=2.5cm]{../extdata/stewardship_report_header.png}};
+    \node[anchor=center] at ($(bannerleft)!0.8!(bannerright)$){\includegraphics[height=3cm]{../extdata/blackwhite_beestewards_logo.png}};
+    \node[anchor=center] at ($(current page.north west) + (0.85\paperwidth,-0.47\paperheight)$){\includegraphics[height=2.5cm]{../extdata/bee.png}};
+    \matrix[matrix anchor=south west, anchor=base, yshift=-1.5cm,xshift=-0.25cm, row sep=0pt, column sep=0.5cm] at (current page text area.south west) {
+      \node{\includegraphics[height=1.75cm]{../extdata/OSU_ES-MM_horizontal_2C_O_over_B.png}}; & `r provLogoTeX` \\
     };
     
 \end{tikzpicture}
 
-\vspace{0.2cm}
-
-\centering\huge
-
-<!-- \huge 2025 Report for `r params$set_title`  -->
-
 \raggedright\Large
+
+\vspace{-0.25cm}
+
+\begin{center} 
+{\Huge\bfseries `r params$set_title`\par}
+\end{center}
+
+\vspace{-0.5cm}
 
 \section{Plant inventory}
 
@@ -221,7 +235,12 @@ provLogoTeX <- paste0("\\node{\\includegraphics[height=2cm]{../extdata/",provLog
 Out of the `r nrow(iNatPlSpp)` identified plant species from your iNaturalist project, \Large`r nrow(filter(iNatPlSpp,!is.na(N)&quality!='poor'))` \Large are bee-friendly plants. Of these plants:
 ]
 
-\includegraphics[width=2.5cm]{../extdata/purple_flowers.png}
+\begin{tikzpicture} 
+  \node[inner sep=0pt] {
+    \hspace{1.5cm}
+    \includegraphics[height=3.2cm]{../extdata/purple_flowers.png}
+  };
+\end{tikzpicture}
 
 \columnbreak
 
@@ -238,7 +257,7 @@ Out of the `r nrow(iNatPlSpp)` identified plant species from your iNaturalist pr
 
 \section{Bee inventory}
 
-Based on bee-plant records from Oregon Bee Atlas, we predict that you have \Large`r nrow(suppBeeSpp)` \Large species of bees at your site. `r ifelse(length(beeDivRange)>1,paste0('Similar sites in your ecroegion have ',paste0(range(beeDivRange),collapse=' - '),' species of bees.'),'')`
+Based on bee and plant records from the `r ifelse(length(provNms)==1,paste0(provNms,' Bee Atlas'),paste0(paste0(provNms[1:(length(provNms)-1)],collapse=', '),', and ',provNms[length(provNms)],' Bee Atlases'))`, we predict that you have \Large`r nrow(suppBeeSpp)` \Large species of bees at your site. `r ifelse(length(beeDivRange)>1,paste0('Similar sites in your ecoregion have ',paste0(range(beeDivRange),collapse=' - '),' species of bees.'),'')`
 The species at your site cover `r length(unique(filter(suppBeeSpp_new,cat=='existing')$lookupFam))` out of the 6 bee families found in North America.
 
 ```{r beeFamilyPlot, out.width = '100%', fig.asp=0.35}
@@ -256,7 +275,7 @@ if(length(unique(iNatPlDat_vy$year))>1){
     mutate(year=factor(year,levels=rev(unique(year)),labels=gsub('in','',rev(unique(year))))) %>%
     ggplot(aes(x=lookupFam,y=n))+
     geom_col(aes(fill=year),col='black')+
-    labs(x=NULL,y='Number of species',fill='Year')+
+    labs(x='Bee Families',y='Number of species',fill='Year')+
     coord_flip()+
     scale_fill_brewer(palette = 'Greys',direction = -1)
   
@@ -266,7 +285,7 @@ if(length(unique(iNatPlDat_vy$year))>1){
     count(lookupFam,.drop=FALSE) %>%
     ggplot(aes(x=lookupFam,y=n))+
     geom_col(col='black',fill='grey20')+
-    labs(x=NULL,y='Number of species')+
+    labs(x='Bee Families',y='Number of species')+
     coord_flip()
 }
 
@@ -275,15 +294,6 @@ if(length(unique(iNatPlDat_vy$year))>1){
 \rule{\linewidth}{1pt}
 
 \footnotesize Stewardship Reports are created using bee-plant interaction data collected by volunteers in the Oregon State University Extension Service Master Melittologist and regional Bee Atlas programs.
-
-<!-- \begin{tikzpicture}[remember picture,overlay] -->
-<!--     <!-- \fill (current page.south west) rectangle ([yshift=0cm] current page text area.north  -| current page.east);  --> 
-<!-- \node[anchor=south east,rectangle,,yshift=0.2cm,xshift=0cm] at (current page marginpar area.north east){\includegraphics[height=3cm]{../extdata/Oregon-BeeAtlas-Logo.png}}; -->
-<!-- \end{tikzpicture} -->
-
-<!-- \node[minimum height = 2.3cm,minimum width=8cm,anchor=south west,font=\color{white}\Huge\linespread{1}\selectfont,rectangle,yshift=-3.5cm,xshift=2.1cm,align=left] at (current page.north west){\textsc{Stewardship Report}}; -->
-<!-- \node[anchor=south east,rectangle,,yshift=0.2cm,xshift=0cm] at (current page marginpar area.north east){\includegraphics[height=4cm]{../extdata/blackwhite_beestewards_logo.png}}; -->
-
 
 \restoregeometry
 
@@ -305,9 +315,9 @@ if(length(unique(iNatPlDat_vy$year))>1){
 \section{The \emph{super bee plants} at your site}
 
 \Large
-
-`r if(nrow(superPl_spp)>0) 'These species are doing the work at your site to support a diverse community of bees.'`
-`r if(nrow(superPl_spp)<=0) "We didn't find (m)any super bee plants at your site. This might be because they weren't documented in your iNaturalist project, or because your site has a lot of opportunity for growth! On the next page, we've put together a site-specific list of plant species to take your bee habitat up a notch and expand the list of bees your site can support."`
+`r if(nrow(superPl_spp)<4) "We didn't find many super bee plants at your site."`
+`r if(nrow(superPl_spp)>0) "These plant species are doing the work at your site to support a diverse community of bees."`
+`r if(nrow(superPl_spp)<=0) "We didn't find any \\emph{super bee plants} at your site. This might be because they weren't documented in your iNaturalist project, or because your site has a lot of opportunity for growth! On the next page, we've put together a site-specific list of plant species to take your bee habitat up a notch and expand the list of bees your site can support."`
 
 ```{r superBeePlantsSpp}
 numPlants <- 8 #Max number of plants to display
@@ -370,7 +380,7 @@ ggplot() + geom_stars(data=st_rgb(b))+
 \clearpage
 \section{Plant recommendations}
 
-There are a few native bee plants from the Willamette Valley region you are currently missing. Adding these species of plants will increase the estimated number of bees at your property from \textbf`r as.character(sum(suppBeeSpp_new$cat=='existing'))` to \textbf`r nrow(suppBeeSpp_new)` species of bees: \large 
+There are a few native bee plants from the `r ecoRegName` region you are currently missing. Adding these species of plants will increase the estimated number of bees at your property from \textbf{`r as.character(sum(suppBeeSpp_new$cat=='existing'))`} to \textbf{`r nrow(suppBeeSpp_new)`} species of bees: \large 
 
 \vspace{0.5cm}
 
