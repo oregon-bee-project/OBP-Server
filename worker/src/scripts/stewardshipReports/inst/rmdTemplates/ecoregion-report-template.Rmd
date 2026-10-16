@@ -197,6 +197,9 @@ provLogoPaths <- unname(sapply(unique(c('Oregon',provNms)),function(nm){ #For Or
 provLogoTeX <- paste0("\\node{\\includegraphics[height=2cm]{../extdata/",provLogoPaths,"}};",collapse=' & ') #LaTex code to render logos as part of a tikzpicture matrix
 ```
 
+<!-- Resolve ../extdata image paths from this template's folder, wherever LaTeX runs -->
+\graphicspath{{`r system.file('rmdTemplates',package='vineyardReportsOSU',mustWork = TRUE)`/}}
+
 <!-- Draws overlay for title page in the following order: -->
 <!-- \fill[osuRed] ... = Red rectangle at the top -->
 <!-- Coordinates... -->

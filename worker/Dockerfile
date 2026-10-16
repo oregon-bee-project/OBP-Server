@@ -1,4 +1,10 @@
-FROM rocker/r-ver:4.5
+FROM rocker/r-ver:4.5.3
+
+# Every R package comes from this dated Posit Package Manager snapshot, as prebuilt Ubuntu binaries, so rebuilds
+#  install the same versions without compiling. It's the snapshot rocker pins for R 4.5.3. To update the packages,
+#  change the date, rebuild, and compare a report from before and after.
+ENV CRAN=https://p3m.dev/cran/__linux__/noble/2026-04-23
+RUN echo "options(repos = c(CRAN = '${CRAN}'))" >> "${R_HOME}/etc/Rprofile.site"
 
 RUN apt-get update && apt-get install -y --no-install-recommends  \
     curl \
@@ -35,19 +41,20 @@ WORKDIR /app
 
 COPY package*.json ./
 RUN npm install
-RUN R -e "install.packages(c('remotes', 'devtools'), repos='https://cloud.r-project.org'); \
-           if (!requireNamespace('remotes', quietly = TRUE) || !requireNamespace('devtools', quietly = TRUE)) \
-             stop('Failed to install remotes and/or devtools')"
+RUN R -e "install.packages(c('remotes', 'pkgload')); \
+           if (!requireNamespace('remotes', quietly = TRUE) || !requireNamespace('pkgload', quietly = TRUE)) \
+             stop('Failed to install remotes and/or pkgload')"
+
+# Install the report package's dependencies before copying the rest of the source, so source edits don't reinstall them
+COPY src/scripts/stewardshipReports/DESCRIPTION /app/src/scripts/stewardshipReports/DESCRIPTION
+RUN R -e "remotes::install_deps('/app/src/scripts/stewardshipReports', dependencies = TRUE, upgrade = 'never')"
 
 COPY . .
 
-RUN R -e "remotes::install_deps('/app/src/scripts/stewardshipReports', dependencies = TRUE, upgrade = 'never')" \
- && R -e "remotes::install_local('/app/src/scripts/stewardshipReports', dependencies = TRUE, force = TRUE)" \
+RUN R -e "remotes::install_local('/app/src/scripts/stewardshipReports', dependencies = TRUE, force = TRUE)" \
  && R -e "desc <- read.dcf('/app/src/scripts/stewardshipReports/DESCRIPTION'); \
            imports <- trimws(strsplit(gsub('\n', '', desc[,'Imports']), ',')[[1]]); \
            missing <- imports[!sapply(imports, requireNamespace, quietly = TRUE)]; \
            if (length(missing) > 0) stop('Failed to install: ', paste(missing, collapse=', '))"
-
-
 
 CMD [ "npm", "run", "start" ]

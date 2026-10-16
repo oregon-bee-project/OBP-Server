@@ -2,16 +2,19 @@
 # Everything else here is a copy of upstream
 # https://github.com/samuelVJrobinson/vineyardReportsOSU at 58b6f0f; to update, copy upstream over it
 # and keep OBP-specific handling in this script and StewardshipReportSubtaskHandler.js.
+# The packages in DESCRIPTION are installed from the dated snapshot pinned in worker/Dockerfile.
 #
 # Local patches to inst/rmdTemplates/ecoregion-report-template.Rmd to reapply after updating (drop each once
 # upstream has an equivalent):
 # - The cover title is {\Huge\bfseries ...\par} rather than \textbf{\Huge{...}}, which microtype 3.1a
 #   (TeX Live 2023, as in the worker image) fails to compile inside the center environment
+# - \graphicspath set to the template's folder, so its ../extdata image paths resolve wherever rmarkdown runs
+#   LaTeX (rmarkdown >= 2.32 runs it in the output directory instead of the template's)
 # - Missing period added after "We didn't find many super bee plants at your site"
 # - "ecroegion" typo fixed
 
 setwd("/app/")
-devtools::load_all('./src/scripts/stewardshipReports')
+pkgload::load_all('./src/scripts/stewardshipReports')
 
 args <- commandArgs(trailingOnly=TRUE)
 
