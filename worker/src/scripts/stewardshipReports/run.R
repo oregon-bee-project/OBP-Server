@@ -7,6 +7,8 @@
 # upstream has an equivalent):
 # - The cover title is {\Huge\bfseries ...\par} rather than \textbf{\Huge{...}}, which microtype 3.1a
 #   (TeX Live 2023, as in the worker image) fails to compile inside the center environment
+# - \graphicspath set to the template's folder, so its ../extdata image paths still resolve now that
+#   rmarkdown >= 2.32 runs LaTeX in the output directory instead of the template's
 # - Missing period added after "We didn't find many super bee plants at your site"
 # - "ecroegion" typo fixed
 
