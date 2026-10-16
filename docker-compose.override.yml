@@ -14,7 +14,7 @@ services:
 
     client-dev:
         container_name: client-dev
-        image: node:20-alpine
+        image: node:24.22.0-alpine
         working_dir: /app
         command: sh -c "npm install && npm run dev -- --host"
         ports:

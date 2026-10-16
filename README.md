@@ -14,7 +14,7 @@ Orchestrated with Docker Compose ([`docker-compose.yml`](docker-compose.yml); de
 4. Log in as an Administrator with the `ADMIN_USERNAME` / `ADMIN_PASSWORD` from your `.env` (seeded on startup).
 
 ### Tests and type checking
-Run `npm install` at the repo root, then:
+Using the Node version in [`.nvmrc`](.nvmrc) (`nvm use`), run `npm install` at the repo root, then:
 - `npm test` (or `npm run test:watch`) — [Vitest](https://vitest.dev) tests, colocated with the code as `*.test.ts`. They run on your machine, not in Docker, and never touch a real database or `.env` (see [`test/setupEnv.ts`](test/setupEnv.ts)).
 - `npm run typecheck` — type-checks with `tsc`. The codebase is migrating to TypeScript incrementally; `.js` and `.ts` files coexist (see [`tsconfig.base.json`](tsconfig.base.json)).
 
