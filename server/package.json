@@ -14,7 +14,7 @@
   "dependencies": {
     "adm-zip": "^0.5.16",
     "amqplib": "^0.10.9",
-    "axios": "^1.13.2",
+    "axios": "^1.20.0",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -26,8 +26,8 @@
     "googleapis": "^171.4.0",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.21.0",
-    "morgan": "^1.10.1",
-    "multer": "^2.0.2",
+    "morgan": "^1.12.1",
+    "multer": "^2.4.0",
     "tsx": "^4.23.1"
   }
 }
