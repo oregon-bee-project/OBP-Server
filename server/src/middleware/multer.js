@@ -10,6 +10,10 @@ const fileTypes = {
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'csv'
 }
 
+// multer leaves array indices in field names (e.g. 'items[4294967294]') unbounded unless this limit is set, and a single
+//  request with a huge index can block the server for minutes (GHSA-535w-7cp7-47q4). Our forms only send flat field names
+const limits = { fieldArrayIndexLimit: 100 }
+
 // Multer object for processing dataset uploads; only allows CSV files and assigns a timestamped file name
 const uploadCSV = multer({
     storage: multer.diskStorage({
@@ -26,7 +30,8 @@ const uploadCSV = multer({
     }),
     fileFilter: (req, file, cb) => {
         cb(null, !!fileTypes[file.mimetype])
-    }
+    },
+    limits
 })
 
 /*
@@ -43,7 +48,8 @@ function createCSVDatasetUpload(fileName) {
         }),
         fileFilter: (req, file, cb) => {
             cb(null, !!fileTypes[file.mimetype])
-        }
+        },
+        limits
     })
 }
 

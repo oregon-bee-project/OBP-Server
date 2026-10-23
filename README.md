@@ -10,7 +10,7 @@ Orchestrated with Docker Compose ([`docker-compose.yml`](docker-compose.yml); de
 ## Local development
 1. Copy [`.env.example`](.env.example) to `.env` and fill it in (generate the secrets with `openssl rand -hex 32`). The server validates required variables at startup via [`shared/lib/config/environment.js`](shared/lib/config/environment.js).
 2. Start the backend: `docker compose up --build mongo rabbitmq server nginx`. (The full `docker compose up` additionally builds the R worker image — slow on the first run — and a Vite dev server at http://localhost:5173.)
-3. Build the client so nginx can serve it: `cd client && npm run build`, then open http://localhost/.
+3. Build the client so nginx can serve it, using the Node version in [`.nvmrc`](.nvmrc): `cd client && npm run build`, then open http://localhost/.
 4. Log in as an Administrator with the `ADMIN_USERNAME` / `ADMIN_PASSWORD` from your `.env` (seeded on startup).
 
 ### Tests and type checking
@@ -22,6 +22,7 @@ Structural notes:
 - [`shared/lib`](shared/lib) has no `package.json` of its own; in Docker its imports resolve against each container's `node_modules`. So a dependency used by `shared/lib` must be declared in **three** places: `server/package.json`, `worker/package.json`, and the root [`package.json`](package.json) (which makes it resolvable for host-side tests).
 - `server/shared` and `worker/shared` are committed symlinks to [`shared/`](shared), mirroring the layout Docker Compose assembles with bind mounts, so that `../shared/lib/...` imports also resolve outside Docker. They're excluded from image builds via each package's `.dockerignore`.
 - The worker's R packages all come from one dated package snapshot set in [`worker/Dockerfile`](worker/Dockerfile), so rebuilding the image doesn't change their versions. A package added to the report package's [`DESCRIPTION`](worker/src/scripts/stewardshipReports/DESCRIPTION) installs at that snapshot's version; to update them all, change the date.
+- Node's exact version is pinned in four places that should change together: [`.nvmrc`](.nvmrc), [`server/Dockerfile`](server/Dockerfile), [`worker/Dockerfile`](worker/Dockerfile) and [`docker-compose.override.yml`](docker-compose.override.yml).
 
 ### First startup
 Everything under `shared/data/` is gitignored (see [`.gitignore`](.gitignore)), so a fresh clone has to recreate it. An Administrator login at melittologist.org can supply populated copies of the CSVs; empty files are enough to boot.

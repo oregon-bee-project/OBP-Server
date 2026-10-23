@@ -21,7 +21,7 @@
     "mongodb": "^6.21.0"
   },
   "devDependencies": {
-    "@types/node": "^24",
+    "@types/node": "^24.19.2",
     "typescript": "^7.0.2",
     "vitest": "^4.1.12"
   }
