@@ -76,6 +76,20 @@ const AppContainer = styled.div`
         }
     }
 
+    #oldBeelineNotice {
+        margin: 0px;
+        padding: 12px 100px;
+
+        font-size: 14pt;
+        color: #222;
+        background-color: #e5cb22;
+
+        a {
+            color: inherit;
+            font-weight: bold;
+        }
+    }
+
     main {
         display: flex;
         flex-direction: column;
@@ -109,6 +123,14 @@ function App({ children }) {
                 </div>
                 { (admin || volunteer) && <CurrentUserButton /> }
             </header>
+            {/* New Beeline took melittologist.org at cutover on 3 November 2026; this
+                interface stays at old.melittologist.org for volunteer determinations
+                through February 2027. Remove the notice when it closes. */}
+            <p id='oldBeelineNotice' role='note'>
+                This is the old Beeline. You can keep entering your determinations here
+                through February 2027. The new Beeline is at{' '}
+                <a href='https://melittologist.org/'>melittologist.org</a>.
+            </p>
             <main>
                 <FlowProvider>
                     { children || <Outlet /> }
