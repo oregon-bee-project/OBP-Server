@@ -125,10 +125,10 @@ function App({ children }) {
             </header>
             {/* New Beeline took melittologist.org at cutover on 3 November 2026; this
                 interface stays at old.melittologist.org for volunteer determinations
-                through February 2027. Remove the notice when it closes. */}
+                through December 2026. Remove the notice when it closes. */}
             <p id='oldBeelineNotice' role='note'>
                 This is the old Beeline. You can keep entering your determinations here
-                through February 2027. The new Beeline is at{' '}
+                through December 2026. The new Beeline is at{' '}
                 <a href='https://melittologist.org/'>melittologist.org</a>.
             </p>
             <main>
